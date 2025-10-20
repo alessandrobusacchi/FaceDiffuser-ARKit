@@ -11,8 +11,9 @@ from data_loader import get_dataloaders
 from diffusion.resample import create_named_schedule_sampler
 from tqdm import tqdm
 
-from models import FaceDiff, FaceDiffBeat, FaceDiffDamm
+from models import FaceDiff, FaceDiffBeat, FaceDiffDamm, FaceDiffMeadARKit
 from utils import *
+
 
 
 def trainer_diff(args, train_loader, dev_loader, model, diffusion, optimizer, epoch=100, device="cuda"):
@@ -260,28 +261,28 @@ def count_parameters(model):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--lr", type=float, default=0.0001, help='learning rate')
-    parser.add_argument("--dataset", type=str, default="BIWI", help='Name of the dataset folder. eg: BIWI')
+    parser.add_argument("--dataset", type=str, default="mead_arkit", help='Name of the dataset folder. eg: BIWI')
     parser.add_argument("--data_path", type=str, default="data")
-    parser.add_argument("--vertice_dim", type=int, default=70110, help='number of vertices - 23370*3 for BIWI dataset')
+    parser.add_argument("--vertice_dim", type=int, default=51, help='number of vertices - 23370*3 for BIWI dataset')
     parser.add_argument("--feature_dim", type=int, default=512, help='Latent Dimension to encode the inputs to')
     parser.add_argument("--gru_dim", type=int, default=512, help='GRU Vertex decoder hidden size')
     parser.add_argument("--gru_layers", type=int, default=2, help='GRU Vertex decoder hidden size')
     parser.add_argument("--wav_path", type=str, default="wav", help='path of the audio signals')
-    parser.add_argument("--vertices_path", type=str, default="vertices_npy", help='path of the ground truth')
+    parser.add_argument("--vertices_path", type=str, default="arkit", help='path of the ground truth')
     parser.add_argument("--gradient_accumulation_steps", type=int, default=1, help='gradient accumulation')
-    parser.add_argument("--max_epoch", type=int, default=50, help='number of epochs')
+    parser.add_argument("--max_epoch", type=int, default=2, help='number of epochs')
     parser.add_argument("--device", type=str, default="cuda")
-    parser.add_argument("--model", type=str, default="face_diffuser", help='name of the trained model')
+    parser.add_argument("--model", type=str, default="face_diffuser_arkit", help='name of the trained model')
     parser.add_argument("--template_file", type=str, default="templates.pkl",
                         help='path of the train subject templates')
     parser.add_argument("--save_path", type=str, default="save", help='path of the trained models')
     parser.add_argument("--result_path", type=str, default="result", help='path to the predictions')
-    parser.add_argument("--train_subjects", type=str, default="F2 F3 F4 M3 M4 M5")
-    parser.add_argument("--val_subjects", type=str, default="F2 F3 F4 M3 M4 M5")
-    parser.add_argument("--test_subjects", type=str, default="F1 F2 F3 F4 F5 F6 F7 F8 M1 M2 M3 M4 M5 M6")
+    parser.add_argument("--train_subjects", type=str, default="M003 M009")
+    parser.add_argument("--val_subjects", type=str, default="M003 M009")
+    parser.add_argument("--test_subjects", type=str, default="M003 M009")
     parser.add_argument("--input_fps", type=int, default=50,
                         help='HuBERT last hidden state produces 50 fps audio representation')
-    parser.add_argument("--output_fps", type=int, default=25,
+    parser.add_argument("--output_fps", type=int, default=30,
                         help='fps of the visual data, BIWI was captured in 25 fps')
     parser.add_argument("--diff_steps", type=int, default=1000, help='number of diffusion steps')
     parser.add_argument("--skip_steps", type=int, default=0, help='number of diffusion steps to skip during inference')
@@ -295,6 +296,15 @@ def main():
         model = FaceDiffDamm(args)
     elif 'beat' in args.dataset:
         model = FaceDiffBeat(
+                args,
+                vertice_dim=args.vertice_dim,
+                latent_dim=args.feature_dim,
+                diffusion_steps=args.diff_steps,
+                gru_latent_dim=args.gru_dim,
+                num_layers=args.gru_layers,
+            )
+    elif 'mead_arkit' in args.dataset:
+        model = FaceDiffMeadARKit(
                 args,
                 vertice_dim=args.vertice_dim,
                 latent_dim=args.feature_dim,

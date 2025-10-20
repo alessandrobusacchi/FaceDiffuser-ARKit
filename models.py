@@ -67,7 +67,7 @@ class FaceDiffDamm(nn.Module):
         self.o_fps = 30
 
         # audio encoder
-        self.audio_encoder = HubertModel.from_pretrained("facebook/hubert-base-ls960")
+        self.audio_encoder = HubertModel.from_pretrained("./hubert/hubert-base-ls960/")
         self.audio_dim = self.audio_encoder.encoder.config.hidden_size
         self.audio_encoder.feature_extractor._freeze_parameters()
 
@@ -166,7 +166,89 @@ class FaceDiffBeat(nn.Module):
         self.one_hot_timesteps = np.eye(args.diff_steps)
 
         # Audio Encoder
-        self.audio_encoder = HubertModel.from_pretrained("facebook/hubert-base-ls960")
+        self.audio_encoder = HubertModel.from_pretrained("./hubert/hubert-base-ls960/")
+        self.audio_dim = self.audio_encoder.encoder.config.hidden_size
+        self.audio_encoder.feature_extractor._freeze_parameters()
+        self.device = args.device
+
+        frozen_layers = [0,1]
+
+        for name, param in self.audio_encoder.named_parameters():
+            if name.startswith("feature_projection"):
+                param.requires_grad = False
+            if name.startswith("encoder.layers"):
+                layer = int(name.split(".")[2])
+                if layer in frozen_layers:
+                    param.requires_grad = False
+
+        # timestep projection
+        self.time_mlp = nn.Sequential(
+            nn.Linear(diffusion_steps, latent_dim),
+            nn.Mish(),
+        )
+
+        self.norm_cond = nn.LayerNorm(cond_feature_dim + vertice_dim + latent_dim)
+
+        # facial decoder
+        self.gru = nn.GRU(
+            cond_feature_dim + vertice_dim + latent_dim,
+            gru_latent_dim,
+            num_layers=num_layers,
+            batch_first=True,
+            dropout=0.3
+        )
+        self.final_layer = nn.Linear(gru_latent_dim, vertice_dim)
+
+    def forward(
+            self, x: Tensor,  times: Tensor, cond_embed: Tensor, one_hot=None, template=None
+    ):
+        batch_size, device = x.shape[0], x.device
+        times = torch.FloatTensor(self.one_hot_timesteps[times])
+        times = times.to(device=device)
+
+        hidden_states = cond_embed
+        hidden_states = self.audio_encoder(hidden_states).last_hidden_state
+        hidden_states, x, frame_num = adjust_input_representation(hidden_states, x, self.i_fps, self.o_fps)
+        cond_embed = hidden_states[:, :frame_num]
+        x = x[:, :frame_num]
+
+        cond_tokens = cond_embed
+
+        # create the diffusion timestep embedding
+        t_tokens = self.time_mlp(times)
+        t_tokens = t_tokens.repeat(frame_num, 1, 1)
+        t_tokens = t_tokens.permute(1, 0, 2)
+
+        # full conditioning tokens
+        full_cond_tokens = torch.cat([cond_tokens, x, t_tokens], dim=-1)
+        full_cond_tokens = self.norm_cond(full_cond_tokens)
+
+        output, _ = self.gru(full_cond_tokens)
+        output = self.final_layer(output)
+
+        return output
+
+
+class FaceDiffMeadARKit(nn.Module):
+    def __init__(
+            self,
+            args,
+            vertice_dim: int,
+            latent_dim: int = 256,
+            cond_feature_dim: int = 1536,
+            diffusion_steps: int = 1000,
+            gru_latent_dim: int = 256,
+            num_layers: int = 2,
+
+    ) -> None:
+
+        super().__init__()
+        self.i_fps = args.input_fps # audio fps (input to the network)
+        self.o_fps = args.output_fps # 4D Scan fps (output or target)
+        self.one_hot_timesteps = np.eye(args.diff_steps)
+
+        # Audio Encoder
+        self.audio_encoder = HubertModel.from_pretrained("./hubert/hubert-base-ls960/")
         self.audio_dim = self.audio_encoder.encoder.config.hidden_size
         self.audio_encoder.feature_extractor._freeze_parameters()
         self.device = args.device
@@ -249,7 +331,7 @@ class FaceDiff(nn.Module):
         self.one_hot_timesteps = np.eye(args.diff_steps)
 
         # Audio Encoder
-        self.audio_encoder = HubertModel.from_pretrained("facebook/hubert-base-ls960")
+        self.audio_encoder = HubertModel.from_pretrained("./hubert/hubert-base-ls960/")
         self.audio_dim = self.audio_encoder.encoder.config.hidden_size
         self.audio_encoder.feature_extractor._freeze_parameters()
         self.device = args.device

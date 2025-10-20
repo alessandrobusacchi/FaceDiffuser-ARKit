@@ -10,7 +10,6 @@ import pickle
 import pymeshlab as pmlab
 import matplotlib
 
-
 def render_single_sequence(seq_path):
     tmp_dir = 'renders/tmp'
     fps = 25
