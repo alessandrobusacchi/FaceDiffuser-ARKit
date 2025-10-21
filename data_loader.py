@@ -135,70 +135,6 @@ def read_data(args):
         for idx in test_indices:
             test_split[idx[-1]].append(int(idx[0]))
 
-    if args.dataset == 'mead_arkit':
-        # Convert to numpy array for easy indexing
-        indices_to_split = np.array(indices_to_split)
-
-        subjects = np.unique(indices_to_split[:, 3])
-
-        # (Optional) extract gender info if you have it, e.g., based on subject_id pattern
-        # Example: assume M001–M030 = male, M031–M060 = female
-        male_subjects = [s for s in subjects if int(s[1:]) <= 30]
-        female_subjects = [s for s in subjects if int(s[1:]) > 30]
-
-        # Split males and females separately to keep gender balance
-        male_train, male_tmp = train_test_split(male_subjects, test_size=0.2, random_state=42)
-        male_val, male_test = train_test_split(male_tmp, test_size=0.5, random_state=42)
-
-        female_train, female_tmp = train_test_split(female_subjects, test_size=0.2, random_state=42)
-        female_val, female_test = train_test_split(female_tmp, test_size=0.5, random_state=42)
-
-        train_subjects = np.concatenate([male_train, female_train])
-        val_subjects = np.concatenate([male_val, female_val])
-        test_subjects = np.concatenate([male_test, female_test])
-
-        # Now assign files based on subject membership
-        train_indices = np.array([x for x in indices_to_split if x[3] in train_subjects])
-        val_indices = np.array([x for x in indices_to_split if x[3] in val_subjects])
-        test_indices = np.array([x for x in indices_to_split if x[3] in test_subjects])
-
-        print(f"Train subjects: {len(train_subjects)}")
-        print(f"Val subjects: {len(val_subjects)}")
-        print(f"Test subjects: {len(test_subjects)}")
-        print(f"Train samples: {len(train_indices)}")
-        print(f"Val samples: {len(val_indices)}")
-        print(f"Test samples: {len(test_indices)}")
-        """
-        if indices_to_split.size == 0:
-            print("Warning: no mead_arkit samples found for the requested subjects; splits will be empty.")
-        else:
-            # We want to keep the emotion proportions the same across splits. The dataset
-            # has variable number of sequences per emotion, so stratify by emotion only
-            # (column index 1).
-            train_indices, test_indices = train_test_split(
-                indices_to_split, test_size=0.1, stratify=indices_to_split[:, 1], random_state=42
-            )
-
-            # Then split train into train/val with the same emotion stratification
-            train_indices, val_indices = train_test_split(
-                train_indices, test_size=1 / 9, stratify=train_indices[:, 1], random_state=42
-            )
-
-            print(train_indices.shape, val_indices.shape, test_indices.shape)
-
-        # Populate per-subject splits if we obtained indices
-        if train_indices.size != 0:
-            for idx in train_indices:
-                # idx layout: [sequence_id, emotion_id, intensity_id, subject_id]
-                train_split[idx[-1]].append(int(idx[0]))  # subject_id -> list of sequence ids
-        if val_indices.size != 0:
-            for idx in val_indices:
-                val_split[idx[-1]].append(int(idx[0]))
-        if test_indices.size != 0:
-            for idx in test_indices:
-                test_split[idx[-1]].append(int(idx[0]))
-        """
-
     indices = list(range(1, 2538))
     random.Random(1).shuffle(indices)
     nr_samples = 100
@@ -224,11 +160,18 @@ def read_data(args):
             'test': test_split
         },
         'mead_arkit': {
-            'train': train_split,
-            'val': val_split,
-            'test': test_split
+            'n_train': list(range(1, 33)),
+            'n_val': list(range(33, 37)),
+            'n_test': list(range(37, 41)),
+            'e_train': list(range(1, 25)),
+            'e_val': list(range(25, 28)),
+            'e_test': list(range(28, 31))
         },
-        'vocaset': {'train': range(1, 41), 'val': range(21, 41), 'test': range(21, 41)}
+        'vocaset': {
+            'train': range(1, 41),
+            'val': range(21, 41),
+            'test': range(21, 41)
+        }
     }
 
 
@@ -257,14 +200,26 @@ def read_data(args):
             elif subject_id in subjects_dict["test"] and sentence_id in splits[args.dataset]['test']:
                 test_data.append(v)
         elif args.dataset == 'mead_arkit':
-            subject_id = k.split("_")[0]
+            subject_id = k.split('_')[0]
             sentence_id = int(k.split("_")[1])
-            if subject_id in subjects_dict["train"] and sentence_id in splits[args.dataset]['train'].get(subject_id, []):
-                train_data.append(v)
-            elif subject_id in subjects_dict["val"] and sentence_id in splits[args.dataset]['val'].get(subject_id, []):
-                valid_data.append(v)
-            elif subject_id in subjects_dict["test"] and sentence_id in splits[args.dataset]['test'].get(subject_id, []):
-                test_data.append(v)
+            emotion_id = int(k.split("_")[2])
+            print('Data ', k, ' is loading...', 'subject is ', subject_id, ' and sentence is ', sentence_id)
+            if emotion_id == 0:
+                if sentence_id in splits[args.dataset]['n_train']:
+                    train_data.append(v)
+                if sentence_id in splits[args.dataset]['n_val']:
+                    valid_data.append(v)
+                if sentence_id in splits[args.dataset]['n_test']:
+                    test_data.append(v)
+            elif emotion_id == 6:
+                continue
+            else:
+                if sentence_id in splits[args.dataset]['e_train']:
+                    train_data.append(v)
+                if sentence_id in splits[args.dataset]['e_val']:
+                    valid_data.append(v)
+                if sentence_id in splits[args.dataset]['e_test']:
+                    test_data.append(v)
         else:
             parts = k.split(".")[0].split("_")
             subject_id = parts[0]
@@ -277,6 +232,9 @@ def read_data(args):
             elif subject_id in subjects_dict["test"] and sentence_id in splits[args.dataset]['test']:
                 test_data.append(v)
 
+    print(f"Training samples: {len(train_data)}")
+    print(f"Validation samples: {len(valid_data)}")
+    print(f"Testing samples: {len(test_data)}")
     return train_data, valid_data, test_data, subjects_dict
 
 
