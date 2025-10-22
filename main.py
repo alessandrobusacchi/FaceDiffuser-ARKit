@@ -15,13 +15,12 @@ from models import FaceDiff, FaceDiffBeat, FaceDiffDamm, FaceDiffMeadARKit
 from utils import *
 
 
-
 def trainer_diff(args, train_loader, dev_loader, model, diffusion, optimizer, epoch=100, device="cuda"):
     train_losses = []
     val_losses = []
 
     save_path = os.path.join(args.save_path)
-    schedule_sampler = create_named_schedule_sampler('uniform', diffusion)
+    schedule_sampler = create_named_schedule_sampler('uniform', diffusion) #scheduler for diffusion timesteps
     train_subjects_list = [i for i in args.train_subjects.split(" ")]
 
     iteration = 0
@@ -29,15 +28,15 @@ def trainer_diff(args, train_loader, dev_loader, model, diffusion, optimizer, ep
     for e in range(epoch + 1):
         loss_log = []
         model.train()
-        pbar = tqdm(enumerate(train_loader), total=len(train_loader))
+        pbar = tqdm(enumerate(train_loader), total=len(train_loader)) # enumerate produces pairs (i, batch). tqdm is for progress bar
         optimizer.zero_grad()
 
         for i, (audio, vertice, template, one_hot, file_name) in pbar:
             iteration += 1
-            vertice = str(vertice[0])
-            vertice = np.load(vertice, allow_pickle=True)
-            vertice = vertice.astype(np.float32)
-            vertice = torch.from_numpy(vertice)
+            vertice = str(vertice[0]) # get the path string
+            vertice = np.load(vertice, allow_pickle=True) # load the file at that path
+            vertice = vertice.astype(np.float32) # ensure the data type is float
+            vertice = torch.from_numpy(vertice) # convert to torch tensor
 
             # for vocaset reduce the frame rate from 60 to 30
             if args.dataset == 'vocaset':
@@ -88,6 +87,7 @@ def trainer_diff(args, train_loader, dev_loader, model, diffusion, optimizer, ep
                 vertice = vertice[::2, :]
             vertice = torch.unsqueeze(vertice, 0)
 
+
             t, weights = schedule_sampler.sample(1, torch.device(device))
 
             audio, vertice = audio.to(device=device), vertice.to(device=device)
@@ -97,7 +97,7 @@ def trainer_diff(args, train_loader, dev_loader, model, diffusion, optimizer, ep
             if train_subject in train_subjects_list:
                 condition_subject = train_subject
                 iter = train_subjects_list.index(condition_subject)
-                one_hot = one_hot_all[:, iter, :]
+                one_hot = one_hot_all[:, iter, :] # select the correct one hot vector. we want to condition on the same subject, so that the model learns the style of each subject
 
                 loss = diffusion.training_losses(
                     model,
@@ -162,6 +162,7 @@ def test_diff(args, model, test_loader, epoch, diffusion, device="cuda"):
         vertice = np.load(vertice, allow_pickle=True)
         vertice = vertice.astype(np.float32)
         vertice = torch.from_numpy(vertice)
+
         if args.dataset == 'vocaset':
             vertice = vertice[::2, :]
         vertice = torch.unsqueeze(vertice, 0)
@@ -170,9 +171,9 @@ def test_diff(args, model, test_loader, epoch, diffusion, device="cuda"):
         audio, vertice =  audio.to(device=device), vertice.to(device=device)
         template, one_hot_all = template.to(device=device), one_hot_all.to(device=device)
 
-        num_frames = int(audio.shape[-1] / sr * args.output_fps)
-        shape = (1, num_frames - 1, args.vertice_dim) if num_frames < vertice.shape[1] else vertice.shape
-
+        num_frames = int(audio.shape[-1] / sr * args.output_fps) # it calculates the number of frames based on audio length and output fps. number of samples (16000) / sampling rate * frames per second
+        shape = (1, num_frames - 1, args.vertice_dim) if num_frames < vertice.shape[1] else vertice.shape # if the audio-derived frame count (num_frames) is smaller than vertice.shape[1] (the number of frames in the ground-truth vertice sequence), then shape is set to a 3-tuple: (1 (batch), num_frames - 1, vertices/blendshapes nr)
+        # else, shape is set to vertice.shape (the shape of the ground-truth vertice sequence)
         train_subject = file_name[0].split("_")[0]
         vertice_path = os.path.split(vertice_path)[-1][:-4]
         print(vertice_path)
@@ -270,16 +271,15 @@ def main():
     parser.add_argument("--wav_path", type=str, default="wav", help='path of the audio signals')
     parser.add_argument("--vertices_path", type=str, default="arkit", help='path of the ground truth')
     parser.add_argument("--gradient_accumulation_steps", type=int, default=1, help='gradient accumulation')
-    parser.add_argument("--max_epoch", type=int, default=2, help='number of epochs')
+    parser.add_argument("--max_epoch", type=int, default=100, help='number of epochs')
     parser.add_argument("--device", type=str, default="cuda")
     parser.add_argument("--model", type=str, default="face_diffuser_arkit", help='name of the trained model')
-    parser.add_argument("--template_file", type=str, default="templates.pkl",
-                        help='path of the train subject templates')
+    parser.add_argument("--template_file", type=str, default="templates.pkl", help='path of the train subject templates')
     parser.add_argument("--save_path", type=str, default="save", help='path of the trained models')
     parser.add_argument("--result_path", type=str, default="result", help='path to the predictions')
-    parser.add_argument("--train_subjects", type=str, default="M003 M009")
-    parser.add_argument("--val_subjects", type=str, default="M003 M009")
-    parser.add_argument("--test_subjects", type=str, default="M003 M009")
+    parser.add_argument("--train_subjects", type=str, default="M003 M005 M007 M009 M013 M022 M023 M024 M025 M026 M027 M028 M029 M030 M031 M032 W009 W014 W015")
+    parser.add_argument("--val_subjects", type=str, default="M003 M005 M007 M009 M013 M022 M023 M024 M025 M026 M027 M028 M029 M030 M031 M032 W009 W014 W015")
+    parser.add_argument("--test_subjects", type=str, default="M003 M005 M007 M009 M013 M022 M023 M024 M025 M026 M027 M028 M029 M030 M031 M032 W009 W014 W015")
     parser.add_argument("--input_fps", type=int, default=50,
                         help='HuBERT last hidden state produces 50 fps audio representation')
     parser.add_argument("--output_fps", type=int, default=30,

@@ -96,9 +96,9 @@ def read_data(args):
 
                     indices_to_split.append([sequence_id, emotion_id, intensity_id, subject_id])
 
-                speech_array, sampling_rate = librosa.load(wav_path, sr=16000)
+                speech_array, sampling_rate = librosa.load(wav_path, sr=16000) # audio resampled to 16kHz. speech array is a 1D float32 array
                 input_values = np.squeeze(processor(speech_array, return_tensors="pt", padding="longest",
-                                         sampling_rate=sampling_rate).input_values)
+                                         sampling_rate=sampling_rate).input_values) # remove the batch dimension. result is a 1d float32 array (seq_len)
 
                 data[key]["audio"] = input_values
                 temp = templates.get(subject_id, np.zeros(args.vertice_dim))
