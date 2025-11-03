@@ -1,6 +1,13 @@
 */__pycache__/*
+.idea/
 .*
 *.pyc
 data/
-demo/*
-pretrained_models/*
+result/
+save/
+hubert/hubert-base-ls960/
+hubert/hubert-xlarge-ls960-ft/
+logs*
+deps/
+configs/
+framework/

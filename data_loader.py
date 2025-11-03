@@ -211,8 +211,8 @@ def read_data(args):
                     valid_data.append(v)
                 if sentence_id in splits[args.dataset]['n_test']:
                     test_data.append(v)
-            elif emotion_id == 6:
-                continue
+            #elif emotion_id == 6:
+            #    continue
             else:
                 if sentence_id in splits[args.dataset]['e_train']:
                     train_data.append(v)
