@@ -8,4 +8,6 @@ save/
 hubert/hubert-base-ls960/
 hubert/hubert-xlarge-ls960-ft/
 logs*
-deps/
+deps/render/blender
+data/mead_arkit/*
+
