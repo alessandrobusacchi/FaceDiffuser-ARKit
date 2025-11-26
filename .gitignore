@@ -10,4 +10,5 @@ hubert/hubert-xlarge-ls960-ft/
 logs*
 deps/render/blender
 data/mead_arkit/*
+pretrained_models/
 

@@ -1,0 +1,24 @@
+hydra:
+  run:
+    dir: .
+  output_subdir: null
+
+logger_level: INFO
+progress_bar: true
+
+frames_folder: ${path.code_dir}/result/unreal         # Folder containing subfolders of PNG frames
+audio_folder: ${path.datasets}/mead_arkit/wav/            # Folder where .wav files live
+output_path: ${path.code_dir}/result/unreal            # Where MP4 will be saved
+
+fps: 30                                      # Output FPS
+resolution: "1280x720"             # Output resolution
+
+cleanup_png: false                 # Delete PNGs after creating the video?
+
+
+defaults:
+  - logger: none
+  - /path@path
+  - override hydra/job_logging: rich    # custom
+  - override hydra/hydra_logging: rich  # custom
+  - _self_

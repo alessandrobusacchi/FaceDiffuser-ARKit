@@ -12,7 +12,7 @@ import matplotlib
 
 def render_single_sequence(seq_path):
     tmp_dir = 'renders/tmp'
-    fps = 25
+    fps = 30
     fourcc = cv2.VideoWriter_fourcc(*'MP4V')
 
     cam = pyrender.PerspectiveCamera(yfov=np.pi / 3.0, aspectRatio=1.414)
@@ -73,7 +73,7 @@ def render_animation(directory, tmp_dir):
         None
     """
 
-    fps = 25
+    fps = 30
     fourcc = cv2.VideoWriter_fourcc(*'MP4V')
 
     cam = pyrender.PerspectiveCamera(yfov=np.pi / 3.0, aspectRatio=1.4141)

@@ -15,7 +15,7 @@ result_folder: ${path.code_dir}/result
 resultMotion_folder: ${result_folder}/
 
 audio_folder: ${path.datasets}/mead_arkit/wav/
-output_path: ${result_folder}/renders/
+output_path: ${result_folder}/renders/facediff_face
 
 defaults:
   - logger: none

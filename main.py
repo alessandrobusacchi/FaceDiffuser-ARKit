@@ -277,12 +277,9 @@ def main():
     parser.add_argument("--template_file", type=str, default="templates.pkl", help='path of the train subject templates')
     parser.add_argument("--save_path", type=str, default="save", help='path of the trained models')
     parser.add_argument("--result_path", type=str, default="result", help='path to the predictions')
-    #parser.add_argument("--train_subjects", type=str, default="M003 M005 M007 M009 M011 M012 M013 M022 M023 M024 M025 M026 M027 M028 M029 M030 M031 M032 M033 M034 M035 M037 M039 M040 M041 M042 W009 W011 W014 W015 W016 W018 W019 W021 W023 W024 W025 W026 W028 W029 W035 W036 W037 W038 W040")
-    #parser.add_argument("--val_subjects", type=str, default="M003 M005 M007 M009 M011 M012 M013 M022 M023 M024 M025 M026 M027 M028 M029 M030 M031 M032 M033 M034 M035 M037 M039 M040 M041 M042 W009 W011 W014 W015 W016 W018 W019 W021 W023 W024 W025 W026 W028 W029 W035 W036 W037 W038 W040")
-    #parser.add_argument("--test_subjects", type=str, default="M003 M005 M007 M009 M011 M012 M013 M022 M023 M024 M025 M026 M027 M028 M029 M030 M031 M032 M033 M034 M035 M037 M039 M040 M041 M042 W009 W011 W014 W015 W016 W018 W019 W021 W023 W024 W025 W026 W028 W029 W035 W036 W037 W038 W040")
-    parser.add_argument("--train_subjects", type=str,  default="M003 M009")
-    parser.add_argument("--val_subjects", type=str, default="M003 M009")
-    parser.add_argument("--test_subjects", type=str, default="M003 M009")
+    parser.add_argument("--train_subjects", type=str, default="M003 M005 M007 M009 M011 M012 M013 M019 M022 M023 M024 M025 M026 M027 M028 M029 M030 M031 M032 M033 M034 M035 M037 M039 M040 M041 M042 W009 W011 W014 W015 W016 W018 W019 W021 W023 W024 W025 W026 W028 W029 W033 W035 W036 W037 W038 W040")
+    parser.add_argument("--val_subjects", type=str, default="M003 M005 M007 M009 M011 M012 M013 M019 M022 M023 M024 M025 M026 M027 M028 M029 M030 M031 M032 M033 M034 M035 M037 M039 M040 M041 M042 W009 W011 W014 W015 W016 W018 W019 W021 W023 W024 W025 W026 W028 W029 W033 W035 W036 W037 W038 W040")
+    parser.add_argument("--test_subjects", type=str, default="M003 M005 M007 M009 M011 M012 M013 M019 M022 M023 M024 M025 M026 M027 M028 M029 M030 M031 M032 M033 M034 M035 M037 M039 M040 M041 M042 W009 W011 W014 W015 W016 W018 W019 W021 W023 W024 W025 W026 W028 W029 W033 W035 W036 W037 W038 W040")
     parser.add_argument("--input_fps", type=int, default=50,
                         help='HuBERT last hidden state produces 50 fps audio representation')
     parser.add_argument("--output_fps", type=int, default=30,

@@ -3,25 +3,33 @@ import numpy as np
 import os
 import sys
 
+# ----------------------------
+# --- Command-line args ------
+# ----------------------------
 filename = str(sys.argv[-1])
 root_dir = str(sys.argv[-2])
 
 seq_pickle = np.load(root_dir + filename + '.npy')
 
-bpy.context.scene.render.engine = 'BLENDER_WORKBENCH'
-bpy.context.scene.display.shading.light = 'MATCAP'
-bpy.context.scene.display.render_aa = 'FXAA'
-bpy.context.scene.render.resolution_x = int(1280)
-bpy.context.scene.render.resolution_y = int(720)
-bpy.context.scene.render.fps = 30
-bpy.context.scene.render.image_settings.file_format = 'PNG'
+# ----------------------------
+# --- Render settings --------
+# ----------------------------
+scene = bpy.context.scene
+scene.render.engine = 'BLENDER_WORKBENCH'
+scene.display.shading.light = 'MATCAP'
+scene.display.render_aa = 'FXAA'
+scene.render.resolution_x = int(1280)
+scene.render.resolution_y = int(720)
+scene.render.fps = 30
+scene.render.image_settings.file_format = 'PNG'
 
 cam = bpy.data.objects['Camera']
-bpy.context.scene.camera = cam
+scene.camera = cam
 
-face_obj = bpy.context.scene.objects["Face"]
-
+face_obj = scene.objects["Face"]
 face_obj.select_set(True)
+if face_obj.animation_data:
+    face_obj.animation_data_clear()
 
 sk_blocks = face_obj.data.shape_keys.key_blocks
 
@@ -71,25 +79,25 @@ print(f"Found {len(name_map)} mapped blendshapes")
 # ---------------------------------------------------
 # Animation loop
 # ---------------------------------------------------
-
 output_dir = root_dir + filename
 os.makedirs(output_dir, exist_ok=True)
 
+depsgraph = bpy.context.evaluated_depsgraph_get()
 
-for frame, frame_values in enumerate(seq_pickle):
-    bpy.context.scene.frame_set(frame)
+for frame, frame_values in enumerate(seq_pickle, start=1):
+    scene.frame_set(frame)
 
     for idx, value in enumerate(frame_values):
         arkit = arkit_names[idx]
         if arkit not in name_map:
             continue
         sk_name = name_map[arkit]
+        print(sk_name, "raw=", float(value), "eval=", sk_blocks[sk_name].value)
         sk_blocks[sk_name].value = float(value)
 
-    bpy.context.view_layer.update()
+    depsgraph.update()
 
-    # Render current frame
-    bpy.context.scene.render.filepath = os.path.join(output_dir, f"{frame:04d}.png")
+    scene.render.filepath = os.path.join(output_dir, f"{frame:04d}.png")
     bpy.ops.render.render(write_still=True)
 
 print(f"Finished rendering frames to: {output_dir}")
