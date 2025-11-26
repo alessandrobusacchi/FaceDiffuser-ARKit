@@ -79,24 +79,24 @@ print(f"Found {len(name_map)} mapped blendshapes")
 # ---------------------------------------------------
 # Animation loop
 # ---------------------------------------------------
+
 output_dir = root_dir + filename
 os.makedirs(output_dir, exist_ok=True)
 
-depsgraph = bpy.context.evaluated_depsgraph_get()
 
-for frame, frame_values in enumerate(seq_pickle, start=1):
-    scene.frame_set(frame)
+for frame, frame_values in enumerate(seq_pickle):
+    bpy.context.scene.frame_set(frame)
 
     for idx, value in enumerate(frame_values):
         arkit = arkit_names[idx]
         if arkit not in name_map:
             continue
         sk_name = name_map[arkit]
-        print(sk_name, "raw=", float(value), "eval=", sk_blocks[sk_name].value)
         sk_blocks[sk_name].value = float(value)
 
-    depsgraph.update()
+    bpy.context.view_layer.update()
 
+    # Render current frame
     scene.render.filepath = os.path.join(output_dir, f"{frame:04d}.png")
     bpy.ops.render.render(write_still=True)
 
