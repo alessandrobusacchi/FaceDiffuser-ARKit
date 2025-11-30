@@ -1288,6 +1288,7 @@ class GaussianDiffusion:
                 target = target[:, :min_length]
 
             terms["loss"] = self.l2_loss(target, model_output)
+            terms["model_output"] = model_output
         else:
             raise NotImplementedError(self.loss_type)
 

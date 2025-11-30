@@ -6,6 +6,7 @@ import shutil
 import pandas as pd
 import torch
 import numpy as np
+import torch.nn.functional as F
 
 from data_loader import get_dataloaders
 from diffusion.resample import create_named_schedule_sampler
@@ -15,9 +16,30 @@ from models import FaceDiff, FaceDiffBeat, FaceDiffDamm, FaceDiffMeadARKit
 from utils import *
 
 
+def velocity_loss(x_pred, x_gt, reduction='mean'):
+    # x_pred, x_gt : (B, T, D)
+
+    # following memory talker
+    vel_pred = x_pred[:, 1:, :] - x_pred[:, :-1, :]
+    vel_gt = x_gt[:, 1:, :] - x_gt[:, :-1, :]
+
+    # MSE loss between velocities
+    return F.mse_loss(vel_pred, vel_gt, reduction=reduction)
+
+def acceleration_loss(x_pred, x_gt, reduction='mean'):
+    # x_pred, x_gt: (B, T, D)
+    acc_pred = x_pred[:, 2:, :] - 2 * x_pred[:, 1:-1, :] + x_pred[:, :-2, :]
+    acc_gt   = x_gt[:, 2:, :]   - 2 * x_gt[:, 1:-1, :]   + x_gt[:, :-2, :]
+    return F.mse_loss(acc_pred, acc_gt, reduction=reduction)
+
+
 def trainer_diff(args, train_loader, dev_loader, model, diffusion, optimizer, epoch=100, device="cuda"):
     train_losses = []
     val_losses = []
+
+    # weights for velocity and acceleration loss
+    λv = 0.1
+    λa = 0.01
 
     save_path = os.path.join(args.save_path)
     schedule_sampler = create_named_schedule_sampler('uniform', diffusion) #scheduler for diffusion timesteps
@@ -26,13 +48,19 @@ def trainer_diff(args, train_loader, dev_loader, model, diffusion, optimizer, ep
     iteration = 0
 
     for e in range(epoch + 1):
-        loss_log = []
+        train_total_losses = []
+        train_loss_log = []
+        train_vel_losses = []
+        train_acc_losses = []
+
         model.train()
         pbar = tqdm(enumerate(train_loader), total=len(train_loader)) # enumerate produces pairs (i, batch). tqdm is for progress bar
         optimizer.zero_grad()
 
         for i, (audio, vertice, template, one_hot, file_name) in pbar:
             iteration += 1
+
+            # vertice array from path
             vertice = str(vertice[0]) # get the path string
             vertice = np.load(vertice, allow_pickle=True) # load the file at that path
             vertice = vertice.astype(np.float32) # ensure the data type is float
@@ -48,7 +76,7 @@ def trainer_diff(args, train_loader, dev_loader, model, diffusion, optimizer, ep
             audio, vertice = audio.to(device=device), vertice.to(device=device)
             template, one_hot = template.to(device=device), one_hot.to(device=device)
 
-            loss = diffusion.training_losses(
+            result = diffusion.training_losses(
                 model,
                 x_start=vertice,
                 t=t,
@@ -57,11 +85,23 @@ def trainer_diff(args, train_loader, dev_loader, model, diffusion, optimizer, ep
                     "one_hot": one_hot,
                     "template": template,
                 }
-            )['loss']
+            )
 
-            loss = torch.mean(loss)
-            loss.backward()
-            loss_log.append(loss.item())
+            loss = torch.mean(result["loss"])
+            model_output = result["model_output"]
+
+            vel_loss = velocity_loss(model_output, vertice, reduction='mean')
+            acc_loss = acceleration_loss(model_output, vertice, reduction='mean')
+
+            train_loss_log.append(loss.item())
+            train_vel_losses.append(float(vel_loss.item()))
+            train_acc_losses.append(float(acc_loss.item()))
+
+            total_loss = loss + λv * vel_loss + λa * acc_loss
+
+            total_loss.backward()
+            train_total_losses.append(float(total_loss.item()))
+
             if i % args.gradient_accumulation_steps == 0:
                 optimizer.step()
                 optimizer.zero_grad()
@@ -69,9 +109,9 @@ def trainer_diff(args, train_loader, dev_loader, model, diffusion, optimizer, ep
                 torch.cuda.empty_cache()
 
             pbar.set_description(
-                "(Epoch {}, iteration {}) TRAIN LOSS:{:.8f}".format((e + 1), iteration, np.mean(loss_log)))
+                "(Epoch {}, iteration {}), TOTAL TRAIN LOSS:{:.8f}, LOG LOSS:{:.8f}, VEL LOSS:{:.8f}, ACC LOSS:{:.8f}".format((e + 1), iteration, np.mean(train_total_losses), np.mean(train_loss_log), np.mean(train_vel_losses), np.mean(train_acc_losses)))
 
-        train_losses.append(np.mean(loss_log))
+        train_losses.append(np.mean(train_total_losses))
 
         valid_loss_log = []
         model.eval()
@@ -87,7 +127,6 @@ def trainer_diff(args, train_loader, dev_loader, model, diffusion, optimizer, ep
                 vertice = vertice[::2, :]
             vertice = torch.unsqueeze(vertice, 0)
 
-
             t, weights = schedule_sampler.sample(1, torch.device(device))
 
             audio, vertice = audio.to(device=device), vertice.to(device=device)
@@ -98,6 +137,7 @@ def trainer_diff(args, train_loader, dev_loader, model, diffusion, optimizer, ep
                 condition_subject = train_subject
                 iter = train_subjects_list.index(condition_subject)
                 one_hot = one_hot_all[:, iter, :] # select the correct one hot vector. we want to condition on the same subject, so that the model learns the style of each subject
+
 
                 loss = diffusion.training_losses(
                     model,
@@ -112,9 +152,11 @@ def trainer_diff(args, train_loader, dev_loader, model, diffusion, optimizer, ep
 
                 loss = torch.mean(loss)
                 valid_loss_log.append(loss.item())
+
             else:
                 for iter in range(one_hot_all.shape[-1]):
                     one_hot = one_hot_all[:, iter, :]
+
                     loss = diffusion.training_losses(
                         model,
                         x_start=vertice,
@@ -135,7 +177,7 @@ def trainer_diff(args, train_loader, dev_loader, model, diffusion, optimizer, ep
         if e == args.max_epoch or e % 25 == 0 and e != 0:
             torch.save(model.state_dict(), os.path.join(save_path, f'{args.model}_{args.dataset}_{e}.pth'))
             plot_losses(train_losses, val_losses, os.path.join(save_path, f"losses_{args.model}_{args.dataset}"))
-        print("epcoh: {}, current loss:{:.8f}".format(e + 1, current_loss))
+        print("Epoch: {}, Current loss:{:.8f}".format(e + 1, current_loss))
 
     plot_losses(train_losses, val_losses, os.path.join(save_path, f"losses_{args.model}_{args.dataset}"))
 
@@ -277,13 +319,14 @@ def main():
     parser.add_argument("--template_file", type=str, default="templates.pkl", help='path of the train subject templates')
     parser.add_argument("--save_path", type=str, default="save", help='path of the trained models')
     parser.add_argument("--result_path", type=str, default="result", help='path to the predictions')
-    parser.add_argument("--train_subjects", type=str, default="M003 M005 M007 M009 M011 M012 M013 M019 M022 M023 M024 M025 M026 M027 M028 M029 M030 M031 M032 M033 M034 M035 M037 M039 M040 M041 M042 W009 W011 W014 W015 W016 W018 W019 W021 W023 W024 W025 W026 W028 W029 W033 W035 W036 W037 W038 W040")
-    parser.add_argument("--val_subjects", type=str, default="M003 M005 M007 M009 M011 M012 M013 M019 M022 M023 M024 M025 M026 M027 M028 M029 M030 M031 M032 M033 M034 M035 M037 M039 M040 M041 M042 W009 W011 W014 W015 W016 W018 W019 W021 W023 W024 W025 W026 W028 W029 W033 W035 W036 W037 W038 W040")
-    parser.add_argument("--test_subjects", type=str, default="M003 M005 M007 M009 M011 M012 M013 M019 M022 M023 M024 M025 M026 M027 M028 M029 M030 M031 M032 M033 M034 M035 M037 M039 M040 M041 M042 W009 W011 W014 W015 W016 W018 W019 W021 W023 W024 W025 W026 W028 W029 W033 W035 W036 W037 W038 W040")
-    parser.add_argument("--input_fps", type=int, default=50,
-                        help='HuBERT last hidden state produces 50 fps audio representation')
-    parser.add_argument("--output_fps", type=int, default=30,
-                        help='fps of the visual data, BIWI was captured in 25 fps')
+    # parser.add_argument("--train_subjects", type=str, default="M003 M005 M007 M009 M011 M012 M013 M019 M022 M023 M024 M025 M026 M027 M028 M029 M030 M031 M032 M033 M034 M035 M037 M039 M040 M041 M042 W009 W011 W014 W015 W016 W018 W019 W021 W023 W024 W025 W026 W028 W029 W033 W035 W036 W037 W038 W040")
+    # parser.add_argument("--val_subjects", type=str, default="M003 M005 M007 M009 M011 M012 M013 M019 M022 M023 M024 M025 M026 M027 M028 M029 M030 M031 M032 M033 M034 M035 M037 M039 M040 M041 M042 W009 W011 W014 W015 W016 W018 W019 W021 W023 W024 W025 W026 W028 W029 W033 W035 W036 W037 W038 W040")
+    # parser.add_argument("--test_subjects", type=str, default="M003 M005 M007 M009 M011 M012 M013 M019 M022 M023 M024 M025 M026 M027 M028 M029 M030 M031 M032 M033 M034 M035 M037 M039 M040 M041 M042 W009 W011 W014 W015 W016 W018 W019 W021 W023 W024 W025 W026 W028 W029 W033 W035 W036 W037 W038 W040")
+    parser.add_argument("--train_subjects", type=str, default="M003 M005 ")
+    parser.add_argument("--val_subjects", type=str, default="M003 M005")
+    parser.add_argument("--test_subjects", type=str, default="M003 M005")
+    parser.add_argument("--input_fps", type=int, default=50, help='HuBERT last hidden state produces 50 fps audio representation')
+    parser.add_argument("--output_fps", type=int, default=30, help='fps of the visual data, BIWI was captured in 25 fps')
     parser.add_argument("--diff_steps", type=int, default=1000, help='number of diffusion steps')
     parser.add_argument("--skip_steps", type=int, default=0, help='number of diffusion steps to skip during inference')
     parser.add_argument("--num_samples", type=int, default=1, help='number of samples to generate per audio')

@@ -11,4 +11,4 @@ logs*
 deps/render/blender
 data/mead_arkit/*
 pretrained_models/
-
+result_history/
