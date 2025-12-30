@@ -9,7 +9,7 @@ import os
 import ffmpeg
 import gc
 import pyrender
-from models import FaceDiff, FaceDiffBeat, FaceDiffDamm
+from models import FaceDiff, FaceDiffBeat, FaceDiffDamm, FaceDiffMeadARKit, FaceDiffMeadARKitTransformerDecoder
 from transformers import Wav2Vec2Processor
 import time
 
@@ -29,6 +29,26 @@ def test_model(args):
             gru_latent_dim=args.gru_dim,
             num_layers=args.gru_layers
         )
+    #elif args.dataset == 'mead_arkit':
+    #    model = FaceDiffMeadARKit(
+    #        args,
+    #       vertice_dim=args.vertice_dim,
+    #        latent_dim=args.feature_dim,
+    #        diffusion_steps=args.diff_steps,
+    #        gru_latent_dim=args.gru_dim,
+    #        num_layers=args.gru_layers
+    #    )
+    elif args.dataset == 'mead_arkit':
+        model = FaceDiffMeadARKitTransformerDecoder(
+            args,
+            vertice_dim=args.vertice_dim,
+            latent_dim=args.feature_dim,  # Maps to args.feature_dim
+            diffusion_steps=args.diff_steps,
+            transformer_decoder_num_heads=args.tf_heads,
+            transformer_decoder_num_layers=args.tf_layers,
+            transformer_decoder_intermediate_size=args.tf_inter_size,
+            transformer_decoder_quant_factor=0
+       )
     elif args.dataset == 'damm_rig_equal':
         model = FaceDiffDamm(args)
     else:
@@ -72,7 +92,7 @@ def test_model(args):
     test_name = os.path.basename(wav_path).split(".")[0]
     start_time = time.time()
     speech_array, sampling_rate = librosa.load(os.path.join(wav_path), sr=16000)
-    processor = Wav2Vec2Processor.from_pretrained("facebook/hubert-xlarge-ls960-ft")
+    processor = Wav2Vec2Processor.from_pretrained("./hubert/hubert-xlarge-ls960-ft")
     audio_feature = processor(speech_array, return_tensors="pt", padding="longest",
                               sampling_rate=sampling_rate).input_values
     audio_feature = np.reshape(audio_feature, (-1, audio_feature.shape[0]))
@@ -212,6 +232,9 @@ def main():
     parser.add_argument("--gru_dim", type=int, default=512)
     parser.add_argument("--gru_layers", type=int, default=2)
     parser.add_argument("--skip_steps", type=int, default=0)
+    parser.add_argument("--tf_heads", type=int, default=8, help='Number of attention heads')
+    parser.add_argument("--tf_layers", type=int, default=6, help='Number of transformer layers')
+    parser.add_argument("--tf_inter_size", type=int, default=384, help='Intermediate size of MLP in transformer')
     args = parser.parse_args()
 
     test_model(args)

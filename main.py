@@ -12,9 +12,8 @@ from data_loader import get_dataloaders
 from diffusion.resample import create_named_schedule_sampler
 from tqdm import tqdm
 
-from models import FaceDiff, FaceDiffBeat, FaceDiffDamm, FaceDiffMeadARKit
+from models import FaceDiff, FaceDiffBeat, FaceDiffDamm, FaceDiffMeadARKit, FaceDiffMeadARKitTransformerDecoder
 from utils import *
-
 
 def velocity_loss(x_pred, x_gt, reduction='mean'):
     # x_pred, x_gt : (B, T, D)
@@ -31,7 +30,6 @@ def acceleration_loss(x_pred, x_gt, reduction='mean'):
     acc_pred = x_pred[:, 2:, :] - 2 * x_pred[:, 1:-1, :] + x_pred[:, :-2, :]
     acc_gt   = x_gt[:, 2:, :]   - 2 * x_gt[:, 1:-1, :]   + x_gt[:, :-2, :]
     return F.mse_loss(acc_pred, acc_gt, reduction=reduction)
-
 
 def trainer_diff(args, train_loader, dev_loader, model, diffusion, optimizer, epoch=100, device="cuda"):
     train_losses = []
@@ -93,14 +91,14 @@ def trainer_diff(args, train_loader, dev_loader, model, diffusion, optimizer, ep
             vel_loss = velocity_loss(model_output, vertice, reduction='mean')
             acc_loss = acceleration_loss(model_output, vertice, reduction='mean')
 
-            train_loss_log.append(loss.item())
-            train_vel_losses.append(float(vel_loss.item()))
-            train_acc_losses.append(float(acc_loss.item()))
+            train_loss_log.append(loss.detach().cpu().item())
+            train_vel_losses.append(float(vel_loss.detach().cpu().item()))
+            train_acc_losses.append(float(acc_loss.detach().cpu().item()))
 
             total_loss = loss + λv * vel_loss + λa * acc_loss
 
             total_loss.backward()
-            train_total_losses.append(float(total_loss.item()))
+            train_total_losses.append(float(total_loss.detach().cpu().item()))
 
             if i % args.gradient_accumulation_steps == 0:
                 optimizer.step()
@@ -151,12 +149,138 @@ def trainer_diff(args, train_loader, dev_loader, model, diffusion, optimizer, ep
                 )['loss']
 
                 loss = torch.mean(loss)
-                valid_loss_log.append(loss.item())
+                valid_loss_log.append(loss.detach().cpu().item())
 
             else:
                 for iter in range(one_hot_all.shape[-1]):
                     one_hot = one_hot_all[:, iter, :]
 
+                    loss = diffusion.training_losses(
+                        model,
+                        x_start=vertice,
+                        t=t,
+                        model_kwargs={
+                            "cond_embed": audio,
+                            "one_hot": one_hot,
+                            "template": template,
+                        }
+                    )['loss']
+
+                    loss = torch.mean(loss)
+                    valid_loss_log.append(loss.detach().cpu().item())
+
+        current_loss = np.mean(valid_loss_log)
+
+        val_losses.append(current_loss)
+        if e == args.max_epoch or e % 25 == 0 and e != 0:
+            torch.save(model.state_dict(), os.path.join(save_path, f'{args.model}_{args.dataset}_{e}.pth'))
+            plot_losses(train_losses, val_losses, os.path.join(save_path, f"losses_{args.model}_{args.dataset}"))
+        print("Epoch: {}, Current loss:{:.8f}".format(e + 1, current_loss))
+
+    plot_losses(train_losses, val_losses, os.path.join(save_path, f"losses_{args.model}_{args.dataset}"))
+
+    return model
+
+'''
+def trainer_diff(args, train_loader, dev_loader, model, diffusion, optimizer, epoch=100, device="cuda"):
+    train_losses = []
+    val_losses = []
+
+    save_path = os.path.join(args.save_path)
+    schedule_sampler = create_named_schedule_sampler('uniform', diffusion)
+    train_subjects_list = [i for i in args.train_subjects.split(" ")]
+
+    iteration = 0
+
+    for e in range(epoch + 1):
+        loss_log = []
+        model.train()
+        pbar = tqdm(enumerate(train_loader), total=len(train_loader))
+        optimizer.zero_grad()
+
+        for i, (audio, vertice, template, one_hot, file_name) in pbar:
+            iteration += 1
+            vertice = str(vertice[0])
+            vertice = np.load(vertice, allow_pickle=True)
+            vertice = vertice.astype(np.float32)
+            vertice = torch.from_numpy(vertice)
+
+            # for vocaset reduce the frame rate from 60 to 30
+            if args.dataset == 'vocaset':
+                vertice = vertice[::2, :]
+            vertice = torch.unsqueeze(vertice, 0)
+
+            t, weights = schedule_sampler.sample(1, torch.device(device))
+
+            audio, vertice = audio.to(device=device), vertice.to(device=device)
+            template, one_hot = template.to(device=device), one_hot.to(device=device)
+
+            loss = diffusion.training_losses(
+                model,
+                x_start=vertice,
+                t=t,
+                model_kwargs={
+                    "cond_embed": audio,
+                    "one_hot": one_hot,
+                    "template": template,
+                }
+            )['loss']
+
+            loss = torch.mean(loss)
+            loss.backward()
+            loss_log.append(loss.item())
+            if i % args.gradient_accumulation_steps == 0:
+                optimizer.step()
+                optimizer.zero_grad()
+                del audio, vertice, template, one_hot
+                torch.cuda.empty_cache()
+
+            pbar.set_description(
+                "(Epoch {}, iteration {}) TRAIN LOSS:{:.8f}".format((e + 1), iteration, np.mean(loss_log)))
+
+        train_losses.append(np.mean(loss_log))
+
+        valid_loss_log = []
+        model.eval()
+        for audio, vertice, template, one_hot_all, file_name in dev_loader:
+            # to gpu
+            vertice = str(vertice[0])
+            vertice = np.load(vertice, allow_pickle=True)
+            vertice = vertice.astype(np.float32)
+            vertice = torch.from_numpy(vertice)
+
+            # for vocaset reduce the frame rate from 60 to 30
+            if args.dataset == 'vocaset':
+                vertice = vertice[::2, :]
+            vertice = torch.unsqueeze(vertice, 0)
+
+            t, weights = schedule_sampler.sample(1, torch.device(device))
+
+            audio, vertice = audio.to(device=device), vertice.to(device=device)
+            template, one_hot_all = template.to(device=device), one_hot_all.to(device=device)
+
+            train_subject = file_name[0].split("_")[0]
+            if train_subject in train_subjects_list:
+                condition_subject = train_subject
+                iter = train_subjects_list.index(condition_subject)
+                one_hot = one_hot_all[:, iter, :]
+
+                loss = diffusion.training_losses(
+                    model,
+                    x_start=vertice,
+                    t=t,
+                    model_kwargs={
+                        "cond_embed": audio,
+                        "one_hot": one_hot,
+                        "template": template,
+                    }
+                )['loss']
+
+                loss = torch.mean(loss)
+                valid_loss_log.append(loss.item())
+            else:
+                for iter in range(one_hot_all.shape[-1]):
+                    one_hot = one_hot_all[:, iter, :]
                     loss = diffusion.training_losses(
                         model,
                         x_start=vertice,
@@ -177,12 +301,12 @@ def trainer_diff(args, train_loader, dev_loader, model, diffusion, optimizer, ep
         if e == args.max_epoch or e % 25 == 0 and e != 0:
             torch.save(model.state_dict(), os.path.join(save_path, f'{args.model}_{args.dataset}_{e}.pth'))
             plot_losses(train_losses, val_losses, os.path.join(save_path, f"losses_{args.model}_{args.dataset}"))
-        print("Epoch: {}, Current loss:{:.8f}".format(e + 1, current_loss))
+        print("epcoh: {}, current loss:{:.8f}".format(e + 1, current_loss))
 
     plot_losses(train_losses, val_losses, os.path.join(save_path, f"losses_{args.model}_{args.dataset}"))
 
     return model
-
+'''
 
 @torch.no_grad()
 def test_diff(args, model, test_loader, epoch, diffusion, device="cuda"):
@@ -307,29 +431,34 @@ def main():
     parser.add_argument("--dataset", type=str, default="mead_arkit", help='Name of the dataset folder. eg: BIWI')
     parser.add_argument("--data_path", type=str, default="data")
     parser.add_argument("--vertice_dim", type=int, default=51, help='number of vertices - 23370*3 for BIWI dataset')
-    parser.add_argument("--feature_dim", type=int, default=512, help='Latent Dimension to encode the inputs to')
-    parser.add_argument("--gru_dim", type=int, default=512, help='GRU Vertex decoder hidden size')
+    parser.add_argument("--feature_dim", type=int, default=512, help='Latent Dimension to encode the inputs to') # try diff dim
+    parser.add_argument("--gru_dim", type=int, default=512, help='GRU Vertex decoder hidden size') # try diff dim
     parser.add_argument("--gru_layers", type=int, default=2, help='GRU Vertex decoder hidden size')
     parser.add_argument("--wav_path", type=str, default="wav", help='path of the audio signals')
     parser.add_argument("--vertices_path", type=str, default="arkit", help='path of the ground truth')
     parser.add_argument("--gradient_accumulation_steps", type=int, default=1, help='gradient accumulation')
-    parser.add_argument("--max_epoch", type=int, default=100, help='number of epochs')
+    parser.add_argument("--max_epoch", type=int, default=200, help='number of epochs')
     parser.add_argument("--device", type=str, default="cuda")
     parser.add_argument("--model", type=str, default="face_diffuser_arkit", help='name of the trained model')
     parser.add_argument("--template_file", type=str, default="templates.pkl", help='path of the train subject templates')
     parser.add_argument("--save_path", type=str, default="save", help='path of the trained models')
     parser.add_argument("--result_path", type=str, default="result", help='path to the predictions')
-    # parser.add_argument("--train_subjects", type=str, default="M003 M005 M007 M009 M011 M012 M013 M019 M022 M023 M024 M025 M026 M027 M028 M029 M030 M031 M032 M033 M034 M035 M037 M039 M040 M041 M042 W009 W011 W014 W015 W016 W018 W019 W021 W023 W024 W025 W026 W028 W029 W033 W035 W036 W037 W038 W040")
-    # parser.add_argument("--val_subjects", type=str, default="M003 M005 M007 M009 M011 M012 M013 M019 M022 M023 M024 M025 M026 M027 M028 M029 M030 M031 M032 M033 M034 M035 M037 M039 M040 M041 M042 W009 W011 W014 W015 W016 W018 W019 W021 W023 W024 W025 W026 W028 W029 W033 W035 W036 W037 W038 W040")
-    # parser.add_argument("--test_subjects", type=str, default="M003 M005 M007 M009 M011 M012 M013 M019 M022 M023 M024 M025 M026 M027 M028 M029 M030 M031 M032 M033 M034 M035 M037 M039 M040 M041 M042 W009 W011 W014 W015 W016 W018 W019 W021 W023 W024 W025 W026 W028 W029 W033 W035 W036 W037 W038 W040")
-    parser.add_argument("--train_subjects", type=str, default="M003 M005 ")
-    parser.add_argument("--val_subjects", type=str, default="M003 M005")
-    parser.add_argument("--test_subjects", type=str, default="M003 M005")
+    parser.add_argument("--train_subjects", type=str, default="M003 M005 M007 M009 M012 M019 M022 M023 M024 M026 M027 M029 M030 M031 M032 M035 W009 W011 W015 W019 W036 W037 W038 W040") #24 17-7
+    parser.add_argument("--val_subjects", type=str, default="M003 M005 M007 M009 M012 M019 M022 M023 M024 M026 M027 M029 M030 M031 M032 M035 W009 W011 W015 W019 W036 W037 W038 W040")
+    parser.add_argument("--test_subjects", type=str, default="M003 M005 M007 M009 M012 M019 M022 M023 M024 M026 M027 M029 M030 M031 M032 M035 W009 W011 W015 W019 W036 W037 W038 W040")
+
+    #parser.add_argument("--train_subjects", type=str, default="M003 M005 M007 M009 M012 M019 M022 M023 M024 M026 M027 M028 M029 M030 M031 M032 M033 M035 M037 M039 M040 W009 W011 W014 W015 W016 W019 W021 W025 W026 W028 W036 W037 W038 W040")  # 35 21-14
+    #parser.add_argument("--val_subjects", type=str, default="M003 M005 M007 M009 M012 M019 M022 M023 M024 M026 M027 M028 M029 M030 M031 M032 M033 M035 M037 M039 M040 W009 W011 W014 W015 W016 W019 W021 W025 W026 W028 W036 W037 W038 W040")
+    #parser.add_argument("--test_subjects", type=str, default="M003 M005 M007 M009 M012 M019 M022 M023 M024 M026 M027 M028 M029 M030 M031 M032 M033 M035 M037 M039 M040 W009 W011 W014 W015 W016 W019 W021 W025 W026 W028 W036 W037 W038 W040")
     parser.add_argument("--input_fps", type=int, default=50, help='HuBERT last hidden state produces 50 fps audio representation')
     parser.add_argument("--output_fps", type=int, default=30, help='fps of the visual data, BIWI was captured in 25 fps')
     parser.add_argument("--diff_steps", type=int, default=1000, help='number of diffusion steps')
     parser.add_argument("--skip_steps", type=int, default=0, help='number of diffusion steps to skip during inference')
     parser.add_argument("--num_samples", type=int, default=1, help='number of samples to generate per audio')
+    # --- Add these to your parser ---
+    parser.add_argument("--tf_heads", type=int, default=8, help='Number of attention heads')
+    parser.add_argument("--tf_layers", type=int, default=6, help='Number of transformer layers')
+    parser.add_argument("--tf_inter_size", type=int, default=384, help='Intermediate size of MLP in transformer')
     args = parser.parse_args()
 
     assert torch.cuda.is_available()
@@ -346,15 +475,25 @@ def main():
                 gru_latent_dim=args.gru_dim,
                 num_layers=args.gru_layers,
             )
+    #elif 'mead_arkit' in args.dataset:
+    #    model = FaceDiffMeadARKit(
+    #            args,
+    #           vertice_dim=args.vertice_dim,
+    #            diffusion_steps=args.diff_steps,
+    #            gru_latent_dim=args.gru_dim,
+    #            num_layers=args.gru_layers,
+    #        )
     elif 'mead_arkit' in args.dataset:
-        model = FaceDiffMeadARKit(
-                args,
-                vertice_dim=args.vertice_dim,
-                latent_dim=args.feature_dim,
-                diffusion_steps=args.diff_steps,
-                gru_latent_dim=args.gru_dim,
-                num_layers=args.gru_layers,
-            )
+       model = FaceDiffMeadARKitTransformerDecoder(
+            args,
+            vertice_dim=args.vertice_dim,
+            latent_dim=args.feature_dim,  # Maps to args.feature_dim
+            diffusion_steps=args.diff_steps,
+            transformer_decoder_num_heads=args.tf_heads,
+            transformer_decoder_num_layers=args.tf_layers,
+            transformer_decoder_intermediate_size=args.tf_inter_size,
+            transformer_decoder_quant_factor=0
+       )
     else:
         model = FaceDiff(
             args,
@@ -373,7 +512,7 @@ def main():
 
     model = trainer_diff(args, dataset["train"], dataset["valid"], model, diffusion, optimizer,
                          epoch=args.max_epoch, device=args.device)
-    test_diff(args, model, dataset["test"], args.max_epoch, diffusion, device=args.device)
+    # test_diff(args, model, dataset["test"], args.max_epoch, diffusion, device=args.device)
 
 
 if __name__ == "__main__":
