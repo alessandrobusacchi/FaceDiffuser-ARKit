@@ -9,7 +9,7 @@ import os
 import ffmpeg
 import gc
 import pyrender
-from models import FaceDiff, FaceDiffBeat, FaceDiffDamm, FaceDiffMeadARKit, FaceDiffMeadARKitTransformerDecoder
+from models import FaceDiff, FaceDiffBeat, FaceDiffDamm, FaceDiffMeadARKit
 from transformers import Wav2Vec2Processor
 import time
 
@@ -29,26 +29,15 @@ def test_model(args):
             gru_latent_dim=args.gru_dim,
             num_layers=args.gru_layers
         )
-    #elif args.dataset == 'mead_arkit':
-    #    model = FaceDiffMeadARKit(
-    #        args,
-    #       vertice_dim=args.vertice_dim,
-    #        latent_dim=args.feature_dim,
-    #        diffusion_steps=args.diff_steps,
-    #        gru_latent_dim=args.gru_dim,
-    #        num_layers=args.gru_layers
-    #    )
     elif args.dataset == 'mead_arkit':
-        model = FaceDiffMeadARKitTransformerDecoder(
+            model = FaceDiffMeadARKit(
             args,
-            vertice_dim=args.vertice_dim,
-            latent_dim=args.feature_dim,  # Maps to args.feature_dim
+           vertice_dim=args.vertice_dim,
+            latent_dim=args.feature_dim,
             diffusion_steps=args.diff_steps,
-            transformer_decoder_num_heads=args.tf_heads,
-            transformer_decoder_num_layers=args.tf_layers,
-            transformer_decoder_intermediate_size=args.tf_inter_size,
-            transformer_decoder_quant_factor=0
-       )
+            gru_latent_dim=args.gru_dim,
+            num_layers=args.gru_layers
+        )
     elif args.dataset == 'damm_rig_equal':
         model = FaceDiffDamm(args)
     else:

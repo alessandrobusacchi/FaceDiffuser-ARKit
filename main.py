@@ -12,7 +12,7 @@ from data_loader import get_dataloaders
 from diffusion.resample import create_named_schedule_sampler
 from tqdm import tqdm
 
-from models import FaceDiff, FaceDiffBeat, FaceDiffDamm, FaceDiffMeadARKit, FaceDiffMeadARKitTransformerDecoder
+from models import FaceDiff, FaceDiffBeat, FaceDiffDamm, FaceDiffMeadARKit
 from utils import *
 
 def velocity_loss(x_pred, x_gt, reduction='mean'):
@@ -37,7 +37,7 @@ def trainer_diff(args, train_loader, dev_loader, model, diffusion, optimizer, ep
 
     # weights for velocity and acceleration loss
     λv = 0.1
-    λa = 0.01
+    λa = 0.02
 
     save_path = os.path.join(args.save_path)
     schedule_sampler = create_named_schedule_sampler('uniform', diffusion) #scheduler for diffusion timesteps
@@ -135,7 +135,6 @@ def trainer_diff(args, train_loader, dev_loader, model, diffusion, optimizer, ep
                 condition_subject = train_subject
                 iter = train_subjects_list.index(condition_subject)
                 one_hot = one_hot_all[:, iter, :] # select the correct one hot vector. we want to condition on the same subject, so that the model learns the style of each subject
-
 
                 loss = diffusion.training_losses(
                     model,
@@ -446,19 +445,11 @@ def main():
     parser.add_argument("--train_subjects", type=str, default="M003 M005 M007 M009 M012 M019 M022 M023 M024 M026 M027 M029 M030 M031 M032 M035 W009 W011 W015 W019 W036 W037 W038 W040") #24 17-7
     parser.add_argument("--val_subjects", type=str, default="M003 M005 M007 M009 M012 M019 M022 M023 M024 M026 M027 M029 M030 M031 M032 M035 W009 W011 W015 W019 W036 W037 W038 W040")
     parser.add_argument("--test_subjects", type=str, default="M003 M005 M007 M009 M012 M019 M022 M023 M024 M026 M027 M029 M030 M031 M032 M035 W009 W011 W015 W019 W036 W037 W038 W040")
-
-    #parser.add_argument("--train_subjects", type=str, default="M003 M005 M007 M009 M012 M019 M022 M023 M024 M026 M027 M028 M029 M030 M031 M032 M033 M035 M037 M039 M040 W009 W011 W014 W015 W016 W019 W021 W025 W026 W028 W036 W037 W038 W040")  # 35 21-14
-    #parser.add_argument("--val_subjects", type=str, default="M003 M005 M007 M009 M012 M019 M022 M023 M024 M026 M027 M028 M029 M030 M031 M032 M033 M035 M037 M039 M040 W009 W011 W014 W015 W016 W019 W021 W025 W026 W028 W036 W037 W038 W040")
-    #parser.add_argument("--test_subjects", type=str, default="M003 M005 M007 M009 M012 M019 M022 M023 M024 M026 M027 M028 M029 M030 M031 M032 M033 M035 M037 M039 M040 W009 W011 W014 W015 W016 W019 W021 W025 W026 W028 W036 W037 W038 W040")
     parser.add_argument("--input_fps", type=int, default=50, help='HuBERT last hidden state produces 50 fps audio representation')
     parser.add_argument("--output_fps", type=int, default=30, help='fps of the visual data, BIWI was captured in 25 fps')
     parser.add_argument("--diff_steps", type=int, default=1000, help='number of diffusion steps')
     parser.add_argument("--skip_steps", type=int, default=0, help='number of diffusion steps to skip during inference')
     parser.add_argument("--num_samples", type=int, default=1, help='number of samples to generate per audio')
-    # --- Add these to your parser ---
-    parser.add_argument("--tf_heads", type=int, default=8, help='Number of attention heads')
-    parser.add_argument("--tf_layers", type=int, default=6, help='Number of transformer layers')
-    parser.add_argument("--tf_inter_size", type=int, default=384, help='Intermediate size of MLP in transformer')
     args = parser.parse_args()
 
     assert torch.cuda.is_available()
@@ -475,25 +466,15 @@ def main():
                 gru_latent_dim=args.gru_dim,
                 num_layers=args.gru_layers,
             )
-    #elif 'mead_arkit' in args.dataset:
-    #    model = FaceDiffMeadARKit(
-    #            args,
-    #           vertice_dim=args.vertice_dim,
-    #            diffusion_steps=args.diff_steps,
-    #            gru_latent_dim=args.gru_dim,
-    #            num_layers=args.gru_layers,
-    #        )
     elif 'mead_arkit' in args.dataset:
-       model = FaceDiffMeadARKitTransformerDecoder(
-            args,
-            vertice_dim=args.vertice_dim,
-            latent_dim=args.feature_dim,  # Maps to args.feature_dim
-            diffusion_steps=args.diff_steps,
-            transformer_decoder_num_heads=args.tf_heads,
-            transformer_decoder_num_layers=args.tf_layers,
-            transformer_decoder_intermediate_size=args.tf_inter_size,
-            transformer_decoder_quant_factor=0
-       )
+        model = FaceDiffMeadARKit(
+                args,
+                vertice_dim=args.vertice_dim,
+                latent_dim=args.feature_dim,
+                diffusion_steps=args.diff_steps,
+                gru_latent_dim=args.gru_dim,
+                num_layers=args.gru_layers,
+            )
     else:
         model = FaceDiff(
             args,

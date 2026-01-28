@@ -7,7 +7,6 @@ from hubert.modeling_hubert import HubertModel
 from torch import Tensor
 
 from framework.model.utils.position_embed import PositionalEncoding
-from framework.model.motion_decoder.transformer_decoder import TransformerDecoder
 
 
 def adjust_input_representation(audio_embedding_matrix, vertex_matrix, ifps, ofps):
@@ -310,93 +309,6 @@ class FaceDiffMeadARKit(nn.Module):
 
         output, _ = self.gru(full_cond_tokens)
         output = self.final_layer(output)
-
-        return output
-
-
-class FaceDiffMeadARKitTransformerDecoder(nn.Module):
-    def __init__(
-            self,
-            args,
-            vertice_dim: int,
-            latent_dim: int = 256,
-            cond_feature_dim: int = 1536,
-            diffusion_steps: int = 1000,
-            transformer_decoder_num_heads: int = 8,
-            transformer_decoder_num_layers: int = 6,
-            transformer_decoder_quant_factor: int = 0,
-            transformer_decoder_intermediate_size: int = 384,
-
-    ) -> None:
-
-        super().__init__()
-        self.i_fps = args.input_fps # audio fps (input to the network)
-        self.o_fps = args.output_fps # 4D Scan fps (output or target)
-        self.one_hot_timesteps = np.eye(args.diff_steps)
-
-        # Audio Encoder
-        self.audio_encoder = HubertModel.from_pretrained("./hubert/hubert-base-ls960/")
-        self.audio_dim = self.audio_encoder.encoder.config.hidden_size
-        self.audio_encoder.feature_extractor._freeze_parameters()
-        self.device = args.device
-
-        frozen_layers = [0,1]
-
-        for name, param in self.audio_encoder.named_parameters():
-            if name.startswith("feature_projection"):
-                param.requires_grad = False
-            if name.startswith("encoder.layers"):
-                layer = int(name.split(".")[2])
-                if layer in frozen_layers:
-                    param.requires_grad = False
-
-        # timestep projection
-        self.time_mlp = nn.Sequential(
-            nn.Linear(diffusion_steps, latent_dim),
-            nn.Mish(),
-        )
-
-        self.feature_projection = nn.Linear(cond_feature_dim + vertice_dim + latent_dim, latent_dim)
-        self.norm_cond = nn.LayerNorm(latent_dim)
-
-        self.decoder = TransformerDecoder(
-            latent_dim=latent_dim,
-            num_heads=transformer_decoder_num_heads,
-            num_layers=transformer_decoder_num_layers,
-            quant_factor=transformer_decoder_quant_factor,  # Set to 0 to keep sequence length 1:1
-            intermediate_size=transformer_decoder_intermediate_size,
-            nfeats=vertice_dim,
-            is_audio=False
-        )
-
-    def forward(
-            self, x: Tensor,  times: Tensor, cond_embed: Tensor, one_hot=None, template=None
-    ):
-        batch_size, device = x.shape[0], x.device
-        times = torch.FloatTensor(self.one_hot_timesteps[times])
-        times = times.to(device=device)
-
-        hidden_states = cond_embed
-        hidden_states = self.audio_encoder(hidden_states).last_hidden_state
-        hidden_states, x, frame_num = adjust_input_representation(hidden_states, x, self.i_fps, self.o_fps)
-        cond_embed = hidden_states[:, :frame_num]
-        x = x[:, :frame_num]
-
-        cond_tokens = cond_embed
-
-        # create the diffusion timestep embedding
-        t_tokens = self.time_mlp(times)
-        t_tokens = t_tokens.repeat(frame_num, 1, 1)
-        t_tokens = t_tokens.permute(1, 0, 2)
-
-        # full conditioning tokens
-        full_cond_tokens = torch.cat([cond_tokens, x, t_tokens], dim=-1)
-
-        # Project to Transformer dimension: (Batch, Seq, 256)
-        projected_tokens = self.feature_projection(full_cond_tokens)
-        projected_tokens = self.norm_cond(projected_tokens)
-
-        output = self.decoder(projected_tokens)
 
         return output
 
