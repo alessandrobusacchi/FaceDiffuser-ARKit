@@ -113,92 +113,8 @@ def trainer_diff(args, train_loader, dev_loader, model, diffusion, optimizer, ep
 
         valid_loss_log = []
         model.eval()
-        for audio, vertice, template, one_hot_all, file_name in dev_loader:
+        for audio, vertice, template, one_hot, file_name in dev_loader:
             # to gpu
-            vertice = str(vertice[0])
-            vertice = np.load(vertice, allow_pickle=True)
-            vertice = vertice.astype(np.float32)
-            vertice = torch.from_numpy(vertice)
-
-            # for vocaset reduce the frame rate from 60 to 30
-            if args.dataset == 'vocaset':
-                vertice = vertice[::2, :]
-            vertice = torch.unsqueeze(vertice, 0)
-
-            t, weights = schedule_sampler.sample(1, torch.device(device))
-
-            audio, vertice = audio.to(device=device), vertice.to(device=device)
-            template, one_hot_all = template.to(device=device), one_hot_all.to(device=device)
-
-            train_subject = file_name[0].split("_")[0]
-            if train_subject in train_subjects_list:
-                condition_subject = train_subject
-                iter = train_subjects_list.index(condition_subject)
-                one_hot = one_hot_all[:, iter, :] # select the correct one hot vector. we want to condition on the same subject, so that the model learns the style of each subject
-
-                loss = diffusion.training_losses(
-                    model,
-                    x_start=vertice,
-                    t=t,
-                    model_kwargs={
-                        "cond_embed": audio,
-                        "one_hot": one_hot,
-                        "template": template,
-                    }
-                )['loss']
-
-                loss = torch.mean(loss)
-                valid_loss_log.append(loss.detach().cpu().item())
-
-            else:
-                for iter in range(one_hot_all.shape[-1]):
-                    one_hot = one_hot_all[:, iter, :]
-
-                    loss = diffusion.training_losses(
-                        model,
-                        x_start=vertice,
-                        t=t,
-                        model_kwargs={
-                            "cond_embed": audio,
-                            "one_hot": one_hot,
-                            "template": template,
-                        }
-                    )['loss']
-
-                    loss = torch.mean(loss)
-                    valid_loss_log.append(loss.detach().cpu().item())
-
-        current_loss = np.mean(valid_loss_log)
-
-        val_losses.append(current_loss)
-        if e == args.max_epoch or e % 25 == 0 and e != 0:
-            torch.save(model.state_dict(), os.path.join(save_path, f'{args.model}_{args.dataset}_{e}.pth'))
-            plot_losses(train_losses, val_losses, os.path.join(save_path, f"losses_{args.model}_{args.dataset}"))
-        print("Epoch: {}, Current loss:{:.8f}".format(e + 1, current_loss))
-
-    plot_losses(train_losses, val_losses, os.path.join(save_path, f"losses_{args.model}_{args.dataset}"))
-
-    return model
-
-'''
-def trainer_diff(args, train_loader, dev_loader, model, diffusion, optimizer, epoch=100, device="cuda"):
-    train_losses = []
-    val_losses = []
-
-    save_path = os.path.join(args.save_path)
-    schedule_sampler = create_named_schedule_sampler('uniform', diffusion)
-    train_subjects_list = [i for i in args.train_subjects.split(" ")]
-
-    iteration = 0
-
-    for e in range(epoch + 1):
-        loss_log = []
-        model.train()
-        pbar = tqdm(enumerate(train_loader), total=len(train_loader))
-        optimizer.zero_grad()
-
-        for i, (audio, vertice, template, one_hot, file_name) in pbar:
-            iteration += 1
             vertice = str(vertice[0])
             vertice = np.load(vertice, allow_pickle=True)
             vertice = vertice.astype(np.float32)
@@ -220,79 +136,13 @@ def trainer_diff(args, train_loader, dev_loader, model, diffusion, optimizer, ep
                 t=t,
                 model_kwargs={
                     "cond_embed": audio,
-                    "one_hot": one_hot,
-                    "template": template,
+                    "one_hot": one_hot.to(device),
+                    "template": template.to(device),
                 }
             )['loss']
 
             loss = torch.mean(loss)
-            loss.backward()
-            loss_log.append(loss.item())
-            if i % args.gradient_accumulation_steps == 0:
-                optimizer.step()
-                optimizer.zero_grad()
-                del audio, vertice, template, one_hot
-                torch.cuda.empty_cache()
-
-            pbar.set_description(
-                "(Epoch {}, iteration {}) TRAIN LOSS:{:.8f}".format((e + 1), iteration, np.mean(loss_log)))
-
-        train_losses.append(np.mean(loss_log))
-
-        valid_loss_log = []
-        model.eval()
-        for audio, vertice, template, one_hot_all, file_name in dev_loader:
-            # to gpu
-            vertice = str(vertice[0])
-            vertice = np.load(vertice, allow_pickle=True)
-            vertice = vertice.astype(np.float32)
-            vertice = torch.from_numpy(vertice)
-
-            # for vocaset reduce the frame rate from 60 to 30
-            if args.dataset == 'vocaset':
-                vertice = vertice[::2, :]
-            vertice = torch.unsqueeze(vertice, 0)
-
-            t, weights = schedule_sampler.sample(1, torch.device(device))
-
-            audio, vertice = audio.to(device=device), vertice.to(device=device)
-            template, one_hot_all = template.to(device=device), one_hot_all.to(device=device)
-
-            train_subject = file_name[0].split("_")[0]
-            if train_subject in train_subjects_list:
-                condition_subject = train_subject
-                iter = train_subjects_list.index(condition_subject)
-                one_hot = one_hot_all[:, iter, :]
-
-                loss = diffusion.training_losses(
-                    model,
-                    x_start=vertice,
-                    t=t,
-                    model_kwargs={
-                        "cond_embed": audio,
-                        "one_hot": one_hot,
-                        "template": template,
-                    }
-                )['loss']
-
-                loss = torch.mean(loss)
-                valid_loss_log.append(loss.item())
-            else:
-                for iter in range(one_hot_all.shape[-1]):
-                    one_hot = one_hot_all[:, iter, :]
-                    loss = diffusion.training_losses(
-                        model,
-                        x_start=vertice,
-                        t=t,
-                        model_kwargs={
-                            "cond_embed": audio,
-                            "one_hot": one_hot,
-                            "template": template,
-                        }
-                    )['loss']
-
-                    loss = torch.mean(loss)
-                    valid_loss_log.append(loss.item())
+            valid_loss_log.append(loss.detach().cpu().item())
 
         current_loss = np.mean(valid_loss_log)
 
@@ -300,12 +150,11 @@ def trainer_diff(args, train_loader, dev_loader, model, diffusion, optimizer, ep
         if e == args.max_epoch or e % 25 == 0 and e != 0:
             torch.save(model.state_dict(), os.path.join(save_path, f'{args.model}_{args.dataset}_{e}.pth'))
             plot_losses(train_losses, val_losses, os.path.join(save_path, f"losses_{args.model}_{args.dataset}"))
-        print("epcoh: {}, current loss:{:.8f}".format(e + 1, current_loss))
+        print("Epoch: {}, Current loss:{:.8f}".format(e + 1, current_loss))
 
     plot_losses(train_losses, val_losses, os.path.join(save_path, f"losses_{args.model}_{args.dataset}"))
 
     return model
-'''
 
 @torch.no_grad()
 def test_diff(args, model, test_loader, epoch, diffusion, device="cuda"):

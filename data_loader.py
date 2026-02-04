@@ -19,6 +19,11 @@ class Dataset(data.Dataset):
         self.len = len(self.data)
         self.subjects_dict = subjects_dict
         self.data_type = data_type
+
+        #one hots
+        self.subject_one_hot = np.eye(len(subjects_dict["train"])) # number of training subjects
+        self.emotion_one_hot = np.eye(8)  # 8 emotions
+        self.intensity_one_hot = np.eye(3)  # 3 intensities
         self.one_hot_labels = np.eye(len(subjects_dict["train"]))
 
     def __getitem__(self, index):
@@ -28,14 +33,24 @@ class Dataset(data.Dataset):
         vertice = self.data[index]["vertice"]
         template = self.data[index]["template"]
 
-        if self.data_type == "train":
-            subject = file_name.split("_")[0]
-            one_hot = self.one_hot_labels[self.subjects_dict["train"].index(subject)]
-        else:
-            one_hot = self.one_hot_labels
+        parts = file_name.split(".")[0].split("_")
+        subject_id = parts[0]
+        emotion_idx = int(parts[2])
+        intensity_idx = int(parts[3])
 
-        return torch.FloatTensor(audio), vertice, torch.FloatTensor(template), torch.FloatTensor(
-            one_hot), file_name
+        #
+        subj_one_hot = self.subject_one_hot[self.subjects_dict["train"].index(subject_id)]
+        emo_one_hot = self.emotion_one_hot[emotion_idx]
+        int_one_hot = self.intensity_one_hot[intensity_idx]
+        one_hot = np.concatenate([subj_one_hot, emo_one_hot, int_one_hot])
+
+        return (
+            torch.FloatTensor(audio),
+            vertice,
+            torch.FloatTensor(template),
+            torch.FloatTensor(one_hot),
+            file_name
+        )
 
     def __len__(self):
         return self.len
@@ -249,7 +264,7 @@ def get_dataloaders(args):
     g.manual_seed(0)
     dataset = {}
     train_data, valid_data, test_data, subjects_dict = read_data(args)
-    print(train_data, valid_data, test_data)
+    # print(train_data, valid_data, test_data)
     train_data = Dataset(train_data, subjects_dict, "train")
     dataset["train"] = data.DataLoader(dataset=train_data, batch_size=1, shuffle=True, worker_init_fn=seed_worker,
                                        generator=g)
