@@ -76,6 +76,14 @@ def main_beat():
     lve = 0
     num_seq = 0
 
+    #upper_mask = [
+    #    8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 49, 50
+    #]
+
+    #mouth_mask = [
+    #    23, 25, 27, 28, 31, 37, 39, 40, 41, 42, 47, 48
+    #]
+
     upper_mask = [
         8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 49, 50
     ]
@@ -137,14 +145,61 @@ def main_mead_arkit():
     mve = 0
     lve = 0
     num_seq = 0
-
-    upper_mask = [
-        8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 49, 50
-    ]
+    total_mee = 0
 
     mouth_mask = [
-        23, 25, 27, 28, 31, 37, 39, 40, 41, 42, 47, 48
+        22,  # jawForward
+        23,  # jawLeft
+        24,  # jawOpen
+        25,  # jawRight
+        26,  # mouthClose
+        27,  # mouthDimpleLeft
+        28,  # mouthDimpleRight
+        29,  # mouthFrownLeft
+        30,  # mouthFrownRight
+        31,  # mouthFunnel
+        32,  # mouthLeft
+        33,  # mouthLowerDownLeft
+        34,  # mouthLowerDownRight
+        35,  # mouthPressLeft
+        36,  # mouthPressRight
+        37,  # mouthPucker
+        38,  # mouthRight
+        39,  # mouthRollLower
+        40,  # mouthRollUpper
+        41,  # mouthShrugLower
+        42,  # mouthShrugUpper
+        43,  # mouthSmileLeft
+        44,  # mouthSmileRight
+        45,  # mouthStretchLeft
+        46,  # mouthStretchRight
+        47,  # mouthUpperUpLeft
+        48,  # mouthUpperUpRight
     ]
+
+    upper_mask = [
+        0,  # browDownLeft
+        1,  # browDownRight
+        2,  # browInnerUp
+        3,  # browOuterUpLeft
+        4,  # browOuterUpRight
+        8,  # eyeBlinkLeft
+        9,  # eyeBlinkRight
+        10,  # eyeLookDownLeft
+        11,  # eyeLookDownRight
+        12,  # eyeLookInLeft
+        13,  # eyeLookInRight
+        14,  # eyeLookOutLeft
+        15,  # eyeLookOutRight
+        16,  # eyeLookUpLeft
+        17,  # eyeLookUpRight
+        18,  # eyeSquintLeft
+        19,  # eyeSquintRight
+        20,  # eyeWideLeft
+        21,  # eyeWideRight
+    ]
+
+    # are old wrong?? to ask
 
     script_dir = Path(__file__).resolve().parent
     project_root = script_dir.parent
@@ -161,6 +216,13 @@ def main_mead_arkit():
 
             gt_seq = np.load(os.path.join(gt_path, file))
             pred_seq = np.load(os.path.join(pred_path, file))
+
+            pred_seqs_MEE = [np.load(os.path.join(pred_path, f"{file[:-4]}_sample{i}.npy")) for i in range(10)]
+            pred_seqs_MEE = [p[:gt_seq.shape[0], :] for p in pred_seqs_MEE]
+            mean_pred = np.mean(pred_seqs_MEE, axis=0)
+            mee_seq = np.linalg.norm(mean_pred[:, mouth_mask] - gt_seq[:, mouth_mask], axis=1).mean()
+
+            total_mee += mee_seq
 
             pred_seq = pred_seq[:gt_seq.shape[0], :]
             gt_seq = gt_seq[:pred_seq.shape[0], :]
@@ -190,6 +252,7 @@ def main_mead_arkit():
 
     print('Mean Vertex Error: {:.4e}'.format(mve / num_seq))
     print('Lip Vertex Error: {:.4e}'.format(lve / num_seq))
+    print('MEE: {:.4e}'.format(sum(total_mee) / len(num_seq)))
     print('FDD: {:.4e}'.format(sum(motion_std_difference) / len(motion_std_difference)))
     print('ABS FDD: {:.4e}'.format(sum(abs_motion_std_difference) / len(motion_std_difference)))
 

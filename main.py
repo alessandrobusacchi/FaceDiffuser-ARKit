@@ -97,14 +97,17 @@ def trainer_diff(args, train_loader, dev_loader, model, diffusion, optimizer, ep
 
             total_loss = loss + λv * vel_loss + λa * acc_loss
 
+            print(f"Train Iter {i}, Memory allocated: {torch.cuda.memory_allocated(device) / 1024**2} MB, Memory free: {torch.cuda.memory_reserved(device) / 1024**2} MB")
+
             total_loss.backward()
             train_total_losses.append(float(total_loss.detach().cpu().item()))
 
             if i % args.gradient_accumulation_steps == 0:
                 optimizer.step()
                 optimizer.zero_grad()
-                del audio, vertice, template, one_hot
+                del audio, vertice, template, one_hot, vel_loss, acc_loss, total_loss
                 torch.cuda.empty_cache()
+                print(f"After clearing Iter {i}, Memory allocated: {torch.cuda.memory_allocated(device) / 1024 ** 2} MB, Memory free: {torch.cuda.memory_reserved(device) / 1024 ** 2} MB")
 
             pbar.set_description(
                 "(Epoch {}, iteration {}), TOTAL TRAIN LOSS:{:.8f}, LOG LOSS:{:.8f}, VEL LOSS:{:.8f}, ACC LOSS:{:.8f}".format((e + 1), iteration, np.mean(train_total_losses), np.mean(train_loss_log), np.mean(train_vel_losses), np.mean(train_acc_losses)))
@@ -113,38 +116,40 @@ def trainer_diff(args, train_loader, dev_loader, model, diffusion, optimizer, ep
 
         valid_loss_log = []
         model.eval()
-        for audio, vertice, template, one_hot, file_name in dev_loader:
-            # to gpu
-            vertice = str(vertice[0])
-            vertice = np.load(vertice, allow_pickle=True)
-            vertice = vertice.astype(np.float32)
-            vertice = torch.from_numpy(vertice)
 
-            # for vocaset reduce the frame rate from 60 to 30
-            if args.dataset == 'vocaset':
-                vertice = vertice[::2, :]
-            vertice = torch.unsqueeze(vertice, 0)
+        with torch.no_grad():
+            for audio, vertice, template, one_hot, file_name in dev_loader:
+                # to gpu
+                vertice = str(vertice[0])
+                vertice = np.load(vertice, allow_pickle=True)
+                vertice = vertice.astype(np.float32)
+                vertice = torch.from_numpy(vertice)
 
-            t, weights = schedule_sampler.sample(1, torch.device(device))
+                # for vocaset reduce the frame rate from 60 to 30
+                if args.dataset == 'vocaset':
+                    vertice = vertice[::2, :]
+                vertice = torch.unsqueeze(vertice, 0)
 
-            audio, vertice = audio.to(device=device), vertice.to(device=device)
-            template, one_hot = template.to(device=device), one_hot.to(device=device)
+                t, weights = schedule_sampler.sample(1, torch.device(device))
 
-            loss = diffusion.training_losses(
-                model,
-                x_start=vertice,
-                t=t,
-                model_kwargs={
-                    "cond_embed": audio,
-                    "one_hot": one_hot.to(device),
-                    "template": template.to(device),
-                }
-            )['loss']
+                audio, vertice = audio.to(device=device), vertice.to(device=device)
+                template, one_hot = template.to(device=device), one_hot.to(device=device)
 
-            loss = torch.mean(loss)
-            valid_loss_log.append(loss.detach().cpu().item())
+                loss = diffusion.training_losses(
+                    model,
+                    x_start=vertice,
+                    t=t,
+                    model_kwargs={
+                        "cond_embed": audio,
+                        "one_hot": one_hot.to(device),
+                        "template": template.to(device),
+                    }
+                )['loss']
 
-        current_loss = np.mean(valid_loss_log)
+                loss = torch.mean(loss)
+                valid_loss_log.append(loss.detach().cpu().item())
+
+            current_loss = np.mean(valid_loss_log)
 
         val_losses.append(current_loss)
         if e == args.max_epoch or e % 25 == 0 and e != 0:
