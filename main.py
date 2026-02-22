@@ -186,7 +186,6 @@ def test_diff(args, model, test_loader, epoch, diffusion, device="cuda"):
             vertice = vertice[::2, :]
         vertice = torch.unsqueeze(vertice, 0)
 
-
         audio, vertice =  audio.to(device=device), vertice.to(device=device)
         template, one_hot_all = template.to(device=device), one_hot_all.to(device=device)
 
@@ -361,9 +360,9 @@ def main():
     dataset = get_dataloaders(args)
     optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, model.parameters()), lr=args.lr)
 
-    model = trainer_diff(args, dataset["train"], dataset["valid"], model, diffusion, optimizer,
-                         epoch=args.max_epoch, device=args.device)
-    # test_diff(args, model, dataset["test"], args.max_epoch, diffusion, device=args.device)
+    #model = trainer_diff(args, dataset["train"], dataset["valid"], model, diffusion, optimizer, epoch=args.max_epoch, device=args.device)
+
+    test_diff(args, model, dataset["test"], args.max_epoch, diffusion, device=args.device)
 
 
 if __name__ == "__main__":
