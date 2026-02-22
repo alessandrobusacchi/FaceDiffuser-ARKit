@@ -198,10 +198,17 @@ def test_diff(args, model, test_loader, epoch, diffusion, device="cuda"):
         print(vertice_path)
 
         if train_subject in train_subjects_list or args.dataset == 'beat' or args.dataset == 'mead_arkit':
-            condition_subject = train_subject
-            iter = train_subjects_list.index(condition_subject)
-            one_hot = one_hot_all[:, iter, :]
-            one_hot = one_hot.to(device=device)
+
+            subj_vec = np.eye(len(train_subjects_list))[train_subjects_list.index(condition_subject)]
+            emo_vec = np.eye(8)[args.emotion]
+            int_vec = np.eye(3)[args.intensity]
+
+            # Concatenate into the 35-dim vector
+            one_hot = np.concatenate([subj_vec, emo_vec, int_vec])
+
+            # Reshape for the model (Batch size 1, 35 dimensions)
+            one_hot = np.reshape(one_hot, (1, -1))
+            one_hot = torch.FloatTensor(one_hot).to(device=args.device)
 
             for sample_idx in range(1, args.num_samples + 1):
                 sample = diffusion.p_sample_loop(
@@ -242,8 +249,17 @@ def test_diff(args, model, test_loader, epoch, diffusion, device="cuda"):
         else:
             for iter in range(one_hot_all.shape[-1]):
                 condition_subject = train_subjects_list[iter]
-                one_hot = one_hot_all[:, iter, :]
-                one_hot = one_hot.to(device=device)
+
+                subj_vec = np.eye(len(train_subjects_list))[train_subjects_list.index(condition_subject)]
+                emo_vec = np.eye(8)[args.emotion]
+                int_vec = np.eye(3)[args.intensity]
+
+                # Concatenate into the 35-dim vector
+                one_hot = np.concatenate([subj_vec, emo_vec, int_vec])
+
+                # Reshape for the model (Batch size 1, 35 dimensions)
+                one_hot = np.reshape(one_hot, (1, -1))
+                one_hot = torch.FloatTensor(one_hot).to(device=args.device)
 
                 # sample conditioned
                 sample_cond = diffusion.p_sample_loop(

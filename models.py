@@ -249,6 +249,9 @@ class FaceDiffMeadARKit(nn.Module):
         self.o_fps = args.output_fps # 4D Scan fps (output or target)
         self.one_hot_timesteps = np.eye(args.diff_steps)
 
+        # Concatenated style embedding, S. need to change this so that it matches hidden_states
+        self.style_vector = nn.Linear(35, cond_feature_dim, bias=False) # 24 + 8 + 3 = 35
+
         # Audio Encoder
         self.audio_encoder = HubertModel.from_pretrained("./hubert/hubert-base-ls960/")
         self.audio_dim = self.audio_encoder.encoder.config.hidden_size
@@ -284,7 +287,7 @@ class FaceDiffMeadARKit(nn.Module):
         self.final_layer = nn.Linear(gru_latent_dim, vertice_dim)
 
     def forward(
-            self, x: Tensor,  times: Tensor, cond_embed: Tensor, one_hot=None, template=None
+            self, x: Tensor,  times: Tensor, cond_embed: Tensor, one_hot, template=None
     ):
         batch_size, device = x.shape[0], x.device
         times = torch.FloatTensor(self.one_hot_timesteps[times])
@@ -293,8 +296,13 @@ class FaceDiffMeadARKit(nn.Module):
         hidden_states = cond_embed
         hidden_states = self.audio_encoder(hidden_states).last_hidden_state
         hidden_states, x, frame_num = adjust_input_representation(hidden_states, x, self.i_fps, self.o_fps)
+
+        style = self.style_vector(one_hot)
+
         cond_embed = hidden_states[:, :frame_num]
         x = x[:, :frame_num]
+
+        cond_embed = cond_embed * style
 
         cond_tokens = cond_embed
 

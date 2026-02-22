@@ -135,65 +135,6 @@ def test_model(args):
         df = pd.DataFrame(prediction)
         df.to_csv(os.path.join(args.result_path, f"{out_file_name}_Damm.csv"), index=None, header=None)
 
-def render(args):
-    fps = args.fps
-    fourcc = cv2.VideoWriter_fourcc(*'MP4V')
-    render_path = "demo/renders/"
-    frames_folder = render_path + "tmp/"
-    video_woA_folder = frames_folder
-    video_wA_folder = render_path + "video_with_audio/"
-
-    wav_path = args.wav_path
-    test_name = os.path.basename(wav_path).split(".")[0]
-    out_file_name = test_name + "_" + args.dataset + "_" + args.subject + "_condition_" + args.condition
-    predicted_vertices_path = os.path.join(args.result_path, out_file_name + ".npy")
-    template_file = f"data/{args.dataset}/templates/face_template.obj"
-    camera_dist = 2.0 if args.dataset == "multiface"  else 1.0
-
-
-    cam = pyrender.PerspectiveCamera(yfov=np.pi / 3.0, aspectRatio=1.414)
-    camera_pose = np.array([[1.0, 0, 0.0, 0.00],
-                            [0.0, 1.0, 0.0, 0.00],
-                            [0.0, 0.0, 1.0, camera_dist],
-                            [0.0, 0.0, 0.0, 1.0]])
-
-    light = pyrender.DirectionalLight(color=[1.0, 1.0, 1.0], intensity=10.0)
-
-    r = pyrender.OffscreenRenderer(640, 480)
-
-    print("rendering the predicted sequence: ", test_name)
-    video_woA_path = video_woA_folder + out_file_name + '.mp4'
-    video_wA_path = video_wA_folder + out_file_name + '.mp4'
-    video = cv2.VideoWriter(video_woA_path, fourcc, fps, (640, 480))
-
-    ref_mesh = trimesh.load_mesh(template_file, process=False)
-    seq = np.load(predicted_vertices_path)
-    seq = np.reshape(seq, (-1, args.vertice_dim // 3, 3))
-    ref_mesh.vertices = seq[0, :, :]
-
-    for f in range(seq.shape[0]):
-        ref_mesh.vertices = seq[f, :, :]
-        py_mesh = pyrender.Mesh.from_trimesh(ref_mesh)
-        scene = pyrender.Scene()
-        scene.add(py_mesh)
-
-        scene.add(cam, pose=camera_pose)
-        scene.add(light, pose=camera_pose)
-        color, _ = r.render(scene)
-
-        output_frame = f"demo/renders/tmp/{f:04d}.png"
-        cv2.imwrite(output_frame, color)
-        frame = cv2.imread(output_frame)
-        video.write(frame)
-    video.release()
-
-    input_video = ffmpeg.input(video_woA_path)
-    input_audio = ffmpeg.input(wav_path)
-
-    ffmpeg.concat(input_video, input_audio, v=1, a=1).output(video_wA_path).run()
-    del video, seq, ref_mesh
-    gc.collect()
-
 
 def main():
     parser = argparse.ArgumentParser()
@@ -224,12 +165,6 @@ def main():
     args = parser.parse_args()
 
     test_model(args)
-
-    # only vertex meshes can be rendered directly
-    # the blendshape results are to be rendered in external engines
-    # like Maya, Blender, UE
-    if args.dataset in ["BIWI", "multiface", "vocaset"]:
-        render(args)
 
 
 if __name__ == "__main__":
