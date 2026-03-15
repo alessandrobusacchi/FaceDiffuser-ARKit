@@ -168,11 +168,10 @@ def test_diff(args, model, test_loader, epoch, diffusion, device="cuda"):
         shutil.rmtree(result_path)
     os.makedirs(result_path)
 
-    save_path = os.path.join(args.save_path)
     train_subjects_list = [i for i in args.train_subjects.split(" ")]
 
-    model.load_state_dict(torch.load(os.path.join(save_path, f'{args.model}_{args.dataset}_{epoch}.pth')))
-    model = model.to(torch.device(device))
+    model.load_state_dict(torch.load('pretrained_models/{}.pth'.format(args.model_name), map_location='cuda'))
+    model = model.to(torch.device(args.device))
     model.eval()
 
     sr = 16000
@@ -192,15 +191,22 @@ def test_diff(args, model, test_loader, epoch, diffusion, device="cuda"):
         num_frames = int(audio.shape[-1] / sr * args.output_fps) # it calculates the number of frames based on audio length and output fps. number of samples (16000) / sampling rate * frames per second
         shape = (1, num_frames - 1, args.vertice_dim) if num_frames < vertice.shape[1] else vertice.shape # if the audio-derived frame count (num_frames) is smaller than vertice.shape[1] (the number of frames in the ground-truth vertice sequence), then shape is set to a 3-tuple: (1 (batch), num_frames - 1, vertices/blendshapes nr)
         # else, shape is set to vertice.shape (the shape of the ground-truth vertice sequence)
-        train_subject = file_name[0].split("_")[0]
+
+        name = os.path.splitext(file_name[0])[0]  # removes .wav
+        parts = name.split("_")
+
+        train_subject = parts[0]
+        emotion = int(parts[2])
+        intensity = int(parts[3])
+
         vertice_path = os.path.split(vertice_path)[-1][:-4]
         print(vertice_path)
 
         if train_subject in train_subjects_list or args.dataset == 'beat' or args.dataset == 'mead_arkit':
 
-            subj_vec = np.eye(len(train_subjects_list))[train_subjects_list.index(condition_subject)]
-            emo_vec = np.eye(8)[args.emotion]
-            int_vec = np.eye(3)[args.intensity]
+            subj_vec = np.eye(len(train_subjects_list))[train_subjects_list.index(train_subject)]
+            emo_vec = np.eye(8)[emotion]
+            int_vec = np.eye(3)[intensity]
 
             # Concatenate into the 35-dim vector
             one_hot = np.concatenate([subj_vec, emo_vec, int_vec])
@@ -234,9 +240,9 @@ def test_diff(args, model, test_loader, epoch, diffusion, device="cuda"):
                     out_path = f"{vertice_path}.npy"
                 else:
                     if args.num_samples != 1:
-                        out_path = f"{vertice_path}_condition_{condition_subject}_{sample_idx}.npy"
+                        out_path = f"{vertice_path}_condition_{train_subject}_{sample_idx}.npy"
                     else:
-                        out_path = f"{vertice_path}_condition_{condition_subject}.npy"
+                        out_path = f"{vertice_path}_condition_{train_subject}.npy"
                 if 'damm' in args.dataset:
                     sample = RIG_SCALER.inverse_transform(sample)
                     np.save(os.path.join(args.result_path, out_path), sample)
@@ -295,6 +301,7 @@ def count_parameters(model):
 
 def main():
     parser = argparse.ArgumentParser()
+    parser.add_argument("--model_name", type=str, default="pretrained_mead_arkit")
     parser.add_argument("--lr", type=float, default=0.0001, help='learning rate')
     parser.add_argument("--dataset", type=str, default="mead_arkit", help='Name of the dataset folder. eg: BIWI')
     parser.add_argument("--data_path", type=str, default="data")
@@ -305,7 +312,7 @@ def main():
     parser.add_argument("--wav_path", type=str, default="wav", help='path of the audio signals')
     parser.add_argument("--vertices_path", type=str, default="arkit", help='path of the ground truth')
     parser.add_argument("--gradient_accumulation_steps", type=int, default=1, help='gradient accumulation')
-    parser.add_argument("--max_epoch", type=int, default=200, help='number of epochs')
+    parser.add_argument("--max_epoch", type=int, default=100, help='number of epochs')
     parser.add_argument("--device", type=str, default="cuda")
     parser.add_argument("--model", type=str, default="face_diffuser_arkit", help='name of the trained model')
     parser.add_argument("--template_file", type=str, default="templates.pkl", help='path of the train subject templates')

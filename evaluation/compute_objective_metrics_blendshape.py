@@ -19,8 +19,8 @@ def main_mead_arkit():
     total_mee = 0
 
     # following arkit blendshapes definition
-    mouth_mask = [22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48]
-    upper_mask = [0, 1, 2, 3, 4, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21]
+    mouth_mask = [26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48] # mouth only blendshapes 22 to 25 is jaw in case to add
+    upper_mask = [0, 1, 2, 3, 4, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21] # brow and eyes
 
     script_dir = Path(__file__).resolve().parent
     project_root = script_dir.parent
@@ -38,12 +38,12 @@ def main_mead_arkit():
             gt_seq = np.load(os.path.join(gt_path, file))
             pred_seq = np.load(os.path.join(pred_path, file))
 
-            pred_seqs_MEE = [np.load(os.path.join(pred_path, f"{file[:-4]}_sample{i}.npy")) for i in range(10)]
-            pred_seqs_MEE = [p[:gt_seq.shape[0], :] for p in pred_seqs_MEE]
-            mean_pred = np.mean(pred_seqs_MEE, axis=0)
-            mee_seq = np.linalg.norm(mean_pred[:, mouth_mask] - gt_seq[:, mouth_mask], axis=1).mean()
+            # pred_seqs_MEE = [np.load(os.path.join(pred_path, f"{file[:-4]}_sample{i}.npy")) for i in range(10)]
+            # pred_seqs_MEE = [p[:gt_seq.shape[0], :] for p in pred_seqs_MEE]
+            # mean_pred = np.mean(pred_seqs_MEE, axis=0)
+            # mee_seq = np.linalg.norm(mean_pred[:, mouth_mask] - gt_seq[:, mouth_mask], axis=1).mean()
 
-            total_mee += mee_seq
+            # total_mee += mee_seq
 
             pred_seq = pred_seq[:gt_seq.shape[0], :]
             gt_seq = gt_seq[:pred_seq.shape[0], :]
@@ -73,7 +73,7 @@ def main_mead_arkit():
 
     print('Mean Vertex Error: {:.4e}'.format(mve / num_seq))
     print('Lip Vertex Error: {:.4e}'.format(lve / num_seq))
-    print('MEE: {:.4e}'.format(sum(total_mee) / len(num_seq)))
+    # print('MEE: {:.4e}'.format(sum(total_mee) / len(num_seq)))
     print('FDD: {:.4e}'.format(sum(motion_std_difference) / len(motion_std_difference)))
     print('ABS FDD: {:.4e}'.format(sum(abs_motion_std_difference) / len(motion_std_difference)))
 
