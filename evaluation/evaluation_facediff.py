@@ -36,12 +36,16 @@ int_dict = {
        "2": "high",
    }
 
-upper_mask =[
-    8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 49, 50
+upper_mask = [
+    0, 1, 2, 3, 4,              # Brows
+    5, 6, 7,                       # Cheek
+    8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21,   # eyes
+    49, 50                      # Nose
 ]
 
 mouth_mask =[
-    23, 25, 27, 28, 31, 37, 39, 40, 41, 42, 47, 48
+    22, 23, 24, 25,     # Jaw
+    26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48  # Mouth
 ]
 
 def lve_compute(vertices_gt, vertices_pred, mouth_map):
@@ -137,7 +141,7 @@ def test_diff(args, model, test_loader, diffusion, device):
                 },
                 skip_timesteps=args.skip_steps,  # 0 is the default value - i.e. don't skip any step
                 init_image=None,
-                progress=True,
+                progress=None,
                 dump_steps=None,
                 noise=None,
                 const_noise=False,
@@ -212,7 +216,7 @@ def test_diff(args, model, test_loader, diffusion, device):
         subset2 = motion_set[5:]
         motion_diversity = 0
         for sample1, sample2 in zip(subset1, subset2):
-            motion_diversity += np.linalg.norm(sample1 - sample2, axis=2).mean(axis=1).mean()
+            motion_diversity += np.linalg.norm(sample1 - sample2, axis=1).mean()
         if len(subset1) == 5 and len(subset2) == 5:
             motion_diversity /= len(subset1)
             diversity += motion_diversity
@@ -282,7 +286,7 @@ if __name__ == '__main__':
     parser.add_argument("--template_file", type=str, default="templates.pkl", help='path of the train subject templates')
     parser.add_argument("--save_path", type=str, default="save", help='path of the trained models')
     parser.add_argument("--result_path", type=str, default="result", help='path to the predictions')
-    parser.add_argument("--train_subjects", type=str, default="M003 M005 M007 M009 M012 M019 M022 M023 M024 M026 M027 M029 M030 M031 M032 M035 W009 W011 W015 W019 W036 W037 W038 W0409")
+    parser.add_argument("--train_subjects", type=str, default="M003 M005 M007 M009 M012 M019 M022 M023 M024 M026 M027 M029 M030 M031 M032 M035 W009 W011 W015 W019 W036 W037 W038 W040")
     parser.add_argument("--val_subjects", type=str, default="M003 M005 M007 M009 M012 M019 M022 M023 M024 M026 M027 M029 M030 M031 M032 M035 W009 W011 W015 W019 W036 W037 W038 W040")
     parser.add_argument("--test_subjects", type=str, default="M003 M005 M007 M009 M012 M019 M022 M023 M024 M026 M027 M029 M030 M031 M032 M035 W009 W011 W015 W019 W036 W037 W038 W040")
     parser.add_argument("--input_fps", type=int, default=50, help='HuBERT last hidden state produces 50 fps audio representation')
