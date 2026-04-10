@@ -7,6 +7,7 @@ import numpy as np
 import argparse
 import datetime
 import sys
+
 current_dir = os.path.dirname(os.path.abspath(__file__))
 parent_dir = os.path.abspath(os.path.join(current_dir, '..'))
 sys.path.append(parent_dir)
@@ -35,36 +36,42 @@ int_dict = {
        "2": "high",
    }
 
+upper_mask = [
+    0, 1, 2, 3, 4,              # Brows
+    5, 6, 7,                       # Cheek
+    8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21,   # eyes
+    49, 50                      # Nose
+]
+
+mouth_mask =[
+    22, 23, 24, 25,     # Jaw
+    26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48  # Mouth
+]
 
 def lve_compute(vertices_gt, vertices_pred, mouth_map):
-    # L2_dis_mouth_max: (428, T, 3), 428 vertex indices
     vertices_gt = np.array(vertices_gt)
     vertices_pred = np.array(vertices_pred)
-    L2_dis_mouth_max = np.array([np.square(vertices_gt[:, v, :] - vertices_pred[:, v, :]) for v in mouth_map])
-    L2_dis_mouth_max = np.transpose(L2_dis_mouth_max, (1, 0, 2))    # (T, 428, 3)
-    L2_dis_mouth_max = np.sum(L2_dis_mouth_max, axis=2)
-    L2_dis_mouth_max = np.max(L2_dis_mouth_max, axis=1)
-    return L2_dis_mouth_max
+    diff = vertices_gt[:, mouth_map] - vertices_pred[:, mouth_map]
+    return np.linalg.norm(diff, axis=1)
 
 
-def seq_std_compute(motion, map):
-    # map: 1501 vertex indices
-    # motion[:, v, :]: (T, 3)
-    L2_dis = np.array([np.square(motion[:, v, :]) for v in map])    # (1501, T, 3)
-    L2_dis = np.transpose(L2_dis, (1, 0, 2))                        # (T, 1501, 3)
-    L2_dis = np.sum(L2_dis, axis=2)
+def seq_std_compute(motion, map_indices):
+    # motion shape: (T, 51)
+    L2_dis = np.array([np.square(motion[:, v]) for v in map_indices])
+    L2_dis = np.transpose(L2_dis, (1, 0))
+    L2_dis = np.sum(L2_dis, axis=1)
     L2_dis = np.std(L2_dis, axis=0)
     std = np.mean(L2_dis)
     return std
 
 
 @torch.no_grad()
-def test_diff(args, model, test_loader, epoch, diffusion, device="cuda:0"):
+def test_diff(args, model, test_loader, diffusion, device):
     result_path = os.path.join(args.result_path)
     os.makedirs(result_path, exist_ok=True)
 
     train_subjects_list = [i for i in args.train_subjects.split(" ")]
-    model_path = f'{args.save_path}/{args.model}_{args.dataset}_{epoch}.pth'
+    model_path = f'pretrained_models/{args.model_name}.pth'
     print("load model from...", model_path)
     sys.stdout.flush()
     model.load_state_dict(torch.load(model_path, map_location=device))
@@ -72,15 +79,9 @@ def test_diff(args, model, test_loader, epoch, diffusion, device="cuda:0"):
     model.eval()
     print("Device checking:", device)
 
-    # load templates for evaluation
-    with open(Path(f"{parent_dir}/datasets/regions/lve.txt"))as f:
-        maps = f.read().split(",")
-        mouth_map = [int(i) for i in maps]
-    with open(Path(f"{parent_dir}/datasets/regions/fdd.txt")) as f:
-        maps = f.read().split(",")
-        upper_map = [int(i) for i in maps]
-    with open(Path(f"{parent_dir}/datasets/templates_mead_vert.pkl"), 'rb') as f:
-        templates = pickle.load(f, encoding='latin1')   # [5023, 3]
+    template_file = os.path.join(args.data_path, args.dataset, args.template_file)
+    with open(template_file, 'rb') as fin:
+        templates = pickle.load(fin, encoding='latin1')
 
     sr = 16000
     # count frame numbers
@@ -91,8 +92,11 @@ def test_diff(args, model, test_loader, epoch, diffusion, device="cuda:0"):
     mee_all = []                # mean value
     ce_all = []                 # closest value
     motion_std_difference = []  # fdd: first prediction
+    abs_motion_std_difference =[] # absolute fdd
     diversity = 0               # 2 subsets
-    for idx, (audio, vertice, template, one_hot_all, file_name, prosody_feats) in enumerate(test_loader):
+    for idx, (audio, vertice, template, one_hot_all, file_name) in enumerate(test_loader):
+
+        print(f"Processing {file_name[0]}...")
         vertice = vertice_path = str(vertice[0])
         vertice = np.load(vertice, allow_pickle=True)
         vertices_npy_gt = vertice.copy()                    # (T, 5023, 3)
@@ -109,24 +113,42 @@ def test_diff(args, model, test_loader, epoch, diffusion, device="cuda:0"):
 
         vertice = vertice.astype(np.float32)
         vertice = torch.from_numpy(vertice)
-        vertice = vertice.reshape(1, vertice.shape[0], vertice.shape[1] * vertice.shape[2])
 
-        audio, vertice, prosody_feats = audio.to(device=device), vertice.to(device=device), prosody_feats.to(device=device)
+        if len(vertice.shape) == 2:
+            vertice = torch.unsqueeze(vertice, 0)
+
+        audio, vertice = audio.to(device=device), vertice.to(device=device)
         template, one_hot_all = template.to(device=device), one_hot_all.to(device=device)
 
         num_frames = int(audio.shape[-1] / sr * args.output_fps)
         shape = (1, num_frames - 1, args.vertice_dim) if num_frames < vertice.shape[1] else vertice.shape
 
-        train_subject = file_name[0].split("_")[0]
+        name = os.path.splitext(file_name[0])[0]  # removes .wav
+        parts = name.split("_")
+
+        train_subject = parts[0]
+        emotion = int(parts[2])
+        intensity = int(parts[3])
+
         sys.stdout.flush()
         assert train_subject in train_subjects_list, "train_subject not in train_subjects_list"
 
-        one_hot = one_hot_all.to(device=device)
+        subj_vec = np.eye(len(train_subjects_list))[train_subjects_list.index(train_subject)]
+        emo_vec = np.eye(8)[emotion]
+        int_vec = np.eye(3)[intensity]
+
+        # Concatenate into the 35-dim vector
+        one_hot = np.concatenate([subj_vec, emo_vec, int_vec])
+
+        # Reshape for the model (Batch size 1, 35 dimensions)
+        one_hot = np.reshape(one_hot, (1, -1))
+        one_hot = torch.FloatTensor(one_hot).to(device=args.device)
+
         ce_lve_set = []  # save 10 lve values
         motion_set = []  # save 10 samples
         for sample_idx in range(1, args.num_samples + 1):
             # use ddim
-            sample = diffusion.ddim_sample_loop(
+            sample = diffusion.p_sample_loop(
                 model,
                 shape,
                 clip_denoised=False,
@@ -134,31 +156,30 @@ def test_diff(args, model, test_loader, epoch, diffusion, device="cuda:0"):
                     "cond_embed": audio,
                     "one_hot": one_hot,
                     "template": template,
-                    "prosody_feats": prosody_feats,
                 },
-                skip_timesteps=args.skip_steps,     # skip 900 timesteps
+                skip_timesteps=args.skip_steps,  # 0 is the default value - i.e. don't skip any step
                 init_image=None,
                 progress=None,
                 dump_steps=None,
                 noise=None,
                 const_noise=False,
-                device=args.device,
+                device=device
             )
             sample = sample.squeeze()
-            sample = sample.detach().cpu().numpy()  # (T, 5023*3)
+            sample = sample.detach().cpu().numpy()
 
-            vertices_npy_pred = sample.reshape(-1, 5023, 3)
-            vertices_npy_pred = vertices_npy_pred[:vertices_npy_gt.shape[0], :, :]  # (T, 5023, 3)
-            vertices_npy_gt = vertices_npy_gt[:vertices_npy_pred.shape[0], :, :]    # (T, 5023, 3)
+            min_len = min(sample.shape[0], vertices_npy_gt.shape[0])
+            pred_seq = sample[:min_len, :]
+            gt_seq = vertices_npy_gt[:min_len, :]
 
             """CE: compute lve for each samples"""
-            ce_lve = lve_compute(vertices_gt=list(vertices_npy_gt),
-                                 vertices_pred=list(vertices_npy_pred),
-                                 mouth_map=mouth_map)
+            ce_lve = lve_compute(vertices_gt=list(gt_seq),
+                                 vertices_pred=list(pred_seq),
+                                 mouth_map=mouth_mask)
             ce_lve_set.append(ce_lve)               # (T,)
 
             # save 10 samples
-            motion_set.append(vertices_npy_pred)    # (T, 5023, 3)
+            motion_set.append(pred_seq)    # (T, 5023, 3)
             torch.cuda.empty_cache()
 
             if args.num_samples != 1:
@@ -172,16 +193,18 @@ def test_diff(args, model, test_loader, epoch, diffusion, device="cuda:0"):
                     print(f"Saving pred: {out_path}")
                     np.save(os.path.join(args.result_path, out_path), sample)
 
+        aligned_len = motion_set[0].shape[0]
+
         """MVE, LVE: save prediction of all audio samples"""
-        vertices_all_gt.extend(list(vertices_npy_gt))               # length T of items (5023, 3)
-        vertices_all_pred.extend(list(motion_set[0]))               # use the first sample
+        vertices_all_gt.extend(list(vertices_npy_gt[:aligned_len]))
+        vertices_all_pred.extend(list(motion_set[0]))
 
         """MEE: mean over 10 samples"""
         motion_set_stack = np.stack(motion_set, axis=0)
         vertices_npy_pred_mean = np.mean(motion_set_stack, axis=0)  # (T, 5023, 3)
-        mee_lve = lve_compute(vertices_gt=list(vertices_npy_gt),
+        mee_lve = lve_compute(vertices_gt=list(vertices_npy_gt[:aligned_len]),
                               vertices_pred=list(vertices_npy_pred_mean),
-                              mouth_map=mouth_map)
+                              mouth_map=mouth_mask)
         mee_all.extend(list(mee_lve))
 
         """CE: closest lve in 10 samples"""
@@ -200,13 +223,10 @@ def test_diff(args, model, test_loader, epoch, diffusion, device="cuda:0"):
         seq_count += 1
 
         """FDD computation: use the first sample"""
-        subject_template = templates[train_subject].reshape(1, 5023, 3)
-        subject_template = subject_template.detach().cpu().numpy()  # (1, 5023, 3)
-        upper_std_gt = seq_std_compute(motion=vertices_npy_gt - subject_template,
-                                       map=upper_map)
-        upper_std_pred = seq_std_compute(motion=motion_set[0] - subject_template,
-                                         map=upper_map)
+        upper_std_gt = seq_std_compute(motion=vertices_npy_gt[:aligned_len], map_indices=upper_mask)
+        upper_std_pred = seq_std_compute(motion=motion_set[0], map_indices=upper_mask)
         motion_std_difference.append(upper_std_gt - upper_std_pred)
+        abs_motion_std_difference.append(np.abs(upper_std_gt - upper_std_pred))
 
         """Diversity computation"""
         np.random.shuffle(motion_set)                               # list of (T, 5023, 3) number=10
@@ -214,7 +234,7 @@ def test_diff(args, model, test_loader, epoch, diffusion, device="cuda:0"):
         subset2 = motion_set[5:]
         motion_diversity = 0
         for sample1, sample2 in zip(subset1, subset2):
-            motion_diversity += np.linalg.norm(sample1 - sample2, axis=2).mean(axis=1).mean()
+            motion_diversity += np.linalg.norm(sample1 - sample2, axis=1).mean()
         if len(subset1) == 5 and len(subset2) == 5:
             motion_diversity /= len(subset1)
             diversity += motion_diversity
@@ -235,13 +255,13 @@ def test_diff(args, model, test_loader, epoch, diffusion, device="cuda:0"):
         """MVE computation"""
         vertices_all_gt = np.array(vertices_all_gt)  # (frame_cunt, 5023, 3)
         vertices_all_pred = np.array(vertices_all_pred)
-        vertices_dis = np.linalg.norm(vertices_all_gt - vertices_all_pred, axis=2)
+        vertices_dis = np.linalg.norm(vertices_all_gt - vertices_all_pred, axis=1)
         print('MVE: {:.4e}'.format(np.mean(vertices_dis)))
 
         """LVE computation"""
         L2_dis_mouth_max = lve_compute(vertices_gt=vertices_all_gt,
                                        vertices_pred=vertices_all_pred,
-                                       mouth_map=mouth_map)
+                                       mouth_map=mouth_mask)
         print('LVE: {:.4e}'.format(np.mean(L2_dis_mouth_max)))
 
         """MEE computation"""
@@ -252,6 +272,7 @@ def test_diff(args, model, test_loader, epoch, diffusion, device="cuda:0"):
 
         """FDD computation"""
         print('FDD: {:.4e}'.format(sum(motion_std_difference) / len(motion_std_difference)))
+        print('ABS FDD: {:.4e}'.format(sum(abs_motion_std_difference) / len(abs_motion_std_difference)))
 
         """Divertiy computation"""
         print('Diversity: {:.4e}'.format(diversity / seq_count))
@@ -267,32 +288,29 @@ def count_parameters(model):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument("--lr", type=float, default=0.0001, help='learning rate')
+    parser.add_argument("--model_name", type=str, default="pretrained_mead_arkit")
     parser.add_argument("--dataset", type=str, default="mead_arkit", help='Name of the dataset folder. eg: BIWI')
-    parser.add_argument("--data_path", type=str, default=f"{parent_dir}/datasets/")
-    parser.add_argument("--vertice_dim", type=int, default=15069, help='number of vertices - 23370*3 for BIWI dataset')
-    parser.add_argument("--feature_dim", type=int, default=256, help='Latent Dimension to encode the inputs to')
-    parser.add_argument("--gru_dim", type=int, default=256, help='GRU Vertex decoder hidden size')
+    parser.add_argument("--data_path", type=str, default="data")
+    parser.add_argument("--vertice_dim", type=int, default=51, help='number of vertices - 23370*3 for BIWI dataset')
+    parser.add_argument("--feature_dim", type=int, default=512, help='Latent Dimension to encode the inputs to')
+    parser.add_argument("--gru_dim", type=int, default=512, help='GRU Vertex decoder hidden size')
     parser.add_argument("--gru_layers", type=int, default=2, help='GRU Vertex decoder hidden size')
     parser.add_argument("--wav_path", type=str, default="wav", help='path of the audio signals')
-    parser.add_argument("--vertices_path", type=str, default="vertex", help='path of the ground truth')
-    parser.add_argument("--prosody_path", type=str, default="prosody_static", help='path of the ground truth extracted prosody')
+    parser.add_argument("--vertices_path", type=str, default="arkit", help='path of the ground truth')
     parser.add_argument("--gradient_accumulation_steps", type=int, default=1, help='gradient accumulation')
     parser.add_argument("--max_epoch", type=int, default=50, help='number of epochs')
-    parser.add_argument("--device", type=str, default="cuda:0")
-    parser.add_argument("--model", type=str, default="face_diffuser", help='name of the trained model')
-    parser.add_argument("--template_file", type=str, default="templates_mead_vert.pkl",
-                        help='path of the train subject templates')
-    parser.add_argument("--save_path", type=str, default="outputs/model", help='path of the trained models')
-    parser.add_argument("--result_path", type=str, default="results/evaluation", help='path to the predictions')
+    parser.add_argument("--device", type=str, default="cuda")
+    parser.add_argument("--model", type=str, default="face_diffuser_arkit", help='name of the trained model')
+    parser.add_argument("--template_file", type=str, default="templates.pkl", help='path of the train subject templates')
+    parser.add_argument("--save_path", type=str, default="save", help='path of the trained models')
+    parser.add_argument("--result_path", type=str, default="result", help='path to the predictions')
     parser.add_argument("--train_subjects", type=str, default="M003 M005 M007 M009 M012 M019 M022 M023 M024 M026 M027 M029 M030 M031 M032 M035 W009 W011 W015 W019 W036 W037 W038 W040")
     parser.add_argument("--val_subjects", type=str, default="M003 M005 M007 M009 M012 M019 M022 M023 M024 M026 M027 M029 M030 M031 M032 M035 W009 W011 W015 W019 W036 W037 W038 W040")
     parser.add_argument("--test_subjects", type=str, default="M003 M005 M007 M009 M012 M019 M022 M023 M024 M026 M027 M029 M030 M031 M032 M035 W009 W011 W015 W019 W036 W037 W038 W040")
-    parser.add_argument("--input_fps", type=int, default=50,
-                        help='HuBERT last hidden state produces 50 fps audio representation')
-    parser.add_argument("--output_fps", type=int, default=30,
-                        help='fps of the visual data, BIWI was captured in 25 fps')
+    parser.add_argument("--input_fps", type=int, default=50, help='HuBERT last hidden state produces 50 fps audio representation')
+    parser.add_argument("--output_fps", type=int, default=30, help='fps of the visual data, BIWI was captured in 25 fps')
     parser.add_argument("--diff_steps", type=int, default=1000, help='number of diffusion steps')
-    parser.add_argument("--skip_steps", type=int, default=900, help='number of diffusion steps to skip during inference')
+    parser.add_argument("--skip_steps", type=int, default=0, help='number of diffusion steps to skip during inference')
     parser.add_argument("--num_samples", type=int, default=10, help='number of samples to generate per audio')
     args = parser.parse_args()
 
@@ -315,8 +333,7 @@ if __name__ == '__main__':
     cuda = torch.device(args.device)
     dataset = get_dataloaders(args)
 
-    test_diff(args, model, dataset["test"], args.max_epoch, diffusion, device=args.device)
+    test_diff(args, model, dataset["test"], diffusion, device=args.device)
 
     end_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     print(f"End time: {end_time}")
-
