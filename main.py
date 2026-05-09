@@ -15,6 +15,7 @@ from tqdm import tqdm
 from models import FaceDiff, FaceDiffBeat, FaceDiffDamm, FaceDiffMeadARKit
 from utils import *
 
+# additional losses to tackle jitter artifacts
 def velocity_loss(x_pred, x_gt, reduction='mean'):
     # x_pred, x_gt : (B, T, D)
 
@@ -303,11 +304,11 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--model_name", type=str, default="pretrained_mead_arkit")
     parser.add_argument("--lr", type=float, default=0.0001, help='learning rate')
-    parser.add_argument("--dataset", type=str, default="mead_arkit", help='Name of the dataset folder. eg: BIWI')
+    parser.add_argument("--dataset", type=str, default="mead_arkit", help='Name of the dataset folder. eg: mead_arkit')
     parser.add_argument("--data_path", type=str, default="data")
-    parser.add_argument("--vertice_dim", type=int, default=51, help='number of vertices - 23370*3 for BIWI dataset')
-    parser.add_argument("--feature_dim", type=int, default=512, help='Latent Dimension to encode the inputs to') # try diff dim
-    parser.add_argument("--gru_dim", type=int, default=512, help='GRU Vertex decoder hidden size') # try diff dim
+    parser.add_argument("--vertice_dim", type=int, default=51, help='number of vertices - 51 for 3DMEAD-ARKIT')
+    parser.add_argument("--feature_dim", type=int, default=512, help='Latent Dimension to encode the inputs to')
+    parser.add_argument("--gru_dim", type=int, default=512, help='GRU Vertex decoder hidden size')
     parser.add_argument("--gru_layers", type=int, default=2, help='GRU Vertex decoder hidden size')
     parser.add_argument("--wav_path", type=str, default="wav", help='path of the audio signals')
     parser.add_argument("--vertices_path", type=str, default="arkit", help='path of the ground truth')
@@ -367,9 +368,8 @@ def main():
     dataset = get_dataloaders(args)
     optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, model.parameters()), lr=args.lr)
 
-    #model = trainer_diff(args, dataset["train"], dataset["valid"], model, diffusion, optimizer, epoch=args.max_epoch, device=args.device)
-
-    test_diff(args, model, dataset["test"], args.max_epoch, diffusion, device=args.device)
+    model = trainer_diff(args, dataset["train"], dataset["valid"], model, diffusion, optimizer, epoch=args.max_epoch, device=args.device)
+    # test_diff(args, model, dataset["test"], args.max_epoch, diffusion, device=args.device)
 
 
 if __name__ == "__main__":

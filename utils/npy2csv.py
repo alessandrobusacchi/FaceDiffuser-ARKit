@@ -3,7 +3,7 @@ import csv
 import os
 from pathlib import Path
 
-# ---- SETTINGS ----
+# blendshapes: 51 (no tongueOut because missing from MediaPipe conversion)
 FPS = 30
 blendshape_names = [
     "BrowDownLeft","BrowDownRight","BrowInnerUp","BrowOuterUpLeft","BrowOuterUpRight",
@@ -29,7 +29,7 @@ def frame_to_timecode(idx, fps):
     return f"{h:02d}:{m:02d}:{s:02d}:{f:02d}"
 
 # Directories
-result_dir = Path("result")
+result_dir = Path("../result")
 conv_dir = result_dir / "conversions"
 conv_dir.mkdir(exist_ok=True)
 
@@ -41,7 +41,7 @@ print("Found", len(npy_files), "npy files")
 
 for npy_path in npy_files:
     filename = npy_path.stem                     # e.g. W036_028_7_1
-    csv_path = conv_dir / f"{filename}_unreal.csv"
+    csv_path = conv_dir / f"{filename}.csv"
     print("Converting:", filename)
 
     arr = np.load(npy_path)

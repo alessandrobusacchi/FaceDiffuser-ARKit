@@ -100,7 +100,7 @@ def read_data(args):
 
                 if args.dataset == 'mead_arkit':
                     parts = key.split(".")[0].split("_")
-                    # expected: [subj, seq, emotion, intensity]
+                    # check to be sure
                     if len(parts) < 4:
                         continue  # skip malformed files
 
@@ -174,6 +174,7 @@ def read_data(args):
             'val': val_split,
             'test': test_split
         },
+        # MEAD has more sentences for neutral emotion than the others. thus, it requires a different splitting
         'mead_arkit': {
             'n_train': list(range(1, 33)),
             'n_val': list(range(33, 37)),
@@ -214,6 +215,7 @@ def read_data(args):
                 valid_data.append(v)
             elif subject_id in subjects_dict["test"] and sentence_id in splits[args.dataset]['test']:
                 test_data.append(v)
+        # for arkit we use this splitting
         elif args.dataset == 'mead_arkit':
             subject_id = k.split('_')[0]
             sentence_id = int(k.split("_")[1])
@@ -226,8 +228,6 @@ def read_data(args):
                     valid_data.append(v)
                 if sentence_id in splits[args.dataset]['n_test']:
                     test_data.append(v)
-            #elif emotion_id == 6:
-            #    continue
             else:
                 if sentence_id in splits[args.dataset]['e_train']:
                     train_data.append(v)
